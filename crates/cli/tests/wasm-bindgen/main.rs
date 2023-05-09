@@ -17,6 +17,7 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
+use wasmparser::Payload;
 
 fn target_dir() -> PathBuf {
     let mut dir = PathBuf::from(env::current_exe().unwrap());
@@ -227,21 +228,30 @@ fn bin_crate_works() {
 }
 
 #[test]
-fn empty_interface_types() {
-    let (mut cmd, _out_dir) = Project::new("empty_interface_types")
+fn bin_crate_works_without_name_section() {
+    let mut project = Project::new("bin_crate_works_without_name_section");
+    project
         .file(
-            "src/lib.rs",
+            "src/main.rs",
             r#"
-                #[no_mangle]
-                pub extern fn foo() {}
-            "#,
+            use wasm_bindgen::prelude::*;
+            #[wasm_bindgen]
+            extern "C" {
+                #[wasm_bindgen(js_namespace = console)]
+                fn log(data: &str);
+            }
+
+            fn main() {
+                log("hello, world");
+            }
+        "#,
         )
         .file(
             "Cargo.toml",
             &format!(
                 "
                     [package]
-                    name = \"empty_interface_types\"
+                    name = \"bin_crate_works_without_name_section\"
                     authors = []
                     version = \"1.0.0\"
                     edition = '2018'
@@ -249,118 +259,159 @@ fn empty_interface_types() {
                     [dependencies]
                     wasm-bindgen = {{ path = '{}' }}
 
-                    [lib]
-                    crate-type = ['cdylib']
-
                     [workspace]
                 ",
                 repo_root().display(),
             ),
-        )
-        .wasm_bindgen("");
-    cmd.env("WASM_INTERFACE_TYPES", "1");
+        );
+    let wasm = project.build();
+
+    // Remove the name section from the module.
+    // This simulates a situation like #3362 where it fails to parse because one of
+    // the names is too long.
+    // Unfortunately, we can't use `walrus` to do this because it gives the name
+    // section special treatment, so instead we use `wasmparser` directly.
+    let mut contents = fs::read(&wasm).unwrap();
+    for payload in wasmparser::Parser::new(0).parse_all(&contents.clone()) {
+        match payload.unwrap() {
+            Payload::CustomSection(reader) if reader.name() == "name" => {
+                /// Figures out how many bytes `x` will take up when encoded in
+                /// unsigned LEB128.
+                fn leb128_len(x: u32) -> usize {
+                    match x {
+                        0..=0x07f => 1,
+                        0x80..=0x3fff => 2,
+                        0x4000..=0x1fffff => 3,
+                        0x200000..=0xfffffff => 4,
+                        0x10000000..=0xffffffff => 5,
+                    }
+                }
+
+                // Figure out the length of the section header.
+                let header_len = 1 + leb128_len(reader.data().len() as u32);
+
+                // Remove the section.
+                contents.drain(reader.range().start - header_len..reader.range().end);
+            }
+            // Ignore everything else.
+            _ => {}
+        }
+    }
+
+    fs::write(&wasm, contents).unwrap();
+
+    // Then run wasm-bindgen on the result.
+    let out_dir = project.root.join("pkg");
+    fs::create_dir_all(&out_dir).unwrap();
+    let mut cmd = Command::cargo_bin("wasm-bindgen").unwrap();
+    cmd.arg("--out-dir")
+        .arg(&out_dir)
+        .arg(&wasm)
+        .arg("--target")
+        .arg("nodejs");
     cmd.assert().success();
+
+    Command::new("node")
+        .arg("bin_crate_works_without_name_section.js")
+        .current_dir(out_dir)
+        .assert()
+        .success()
+        .stdout("hello, world\n");
 }
 
 #[test]
-fn bad_interface_types_export() -> anyhow::Result<()> {
-    let (mut cmd, _out_dir) = Project::new("bad_interface_types_export")
+fn default_module_path_target_web() {
+    let (mut cmd, out_dir) = Project::new("default_module_path_target_web")
         .file(
             "src/lib.rs",
             r#"
-                use wasm_bindgen::prelude::*;
-
-                #[wasm_bindgen]
-                pub fn foo(a: Vec<u8>) {}
             "#,
         )
-        .file(
-            "Cargo.toml",
-            &format!(
-                "
-                    [package]
-                    name = \"bad_interface_types_export\"
-                    authors = []
-                    version = \"1.0.0\"
-                    edition = '2018'
-
-                    [lib]
-                    crate-type = [\"cdylib\"]
-
-                    [dependencies]
-                    wasm-bindgen = {{ path = '{}' }}
-
-                    [workspace]
-                ",
-                repo_root().display(),
-            ),
-        )
-        .wasm_bindgen("");
-    cmd.env("WASM_INTERFACE_TYPES", "1");
-    cmd.assert().failure().code(1).stderr(str::is_match(
+        .wasm_bindgen("--target web");
+    cmd.assert().success();
+    let contents = fs::read_to_string(out_dir.join("default_module_path_target_web.js")).unwrap();
+    assert!(contents.contains(
         "\
-error: failed to generate a standard interface types section
+async function __wbg_init(input) {
+    if (wasm !== undefined) return wasm;
 
-Caused by:
-    0: in function export `foo`
-    1: type Vector\\(U8\\) isn't supported in standard interface types
-$",
-    )?);
-    Ok(())
+    if (typeof input === 'undefined') {
+        input = new URL('default_module_path_target_web_bg.wasm', import.meta.url);
+    }",
+    ));
 }
 
 #[test]
-fn bad_interface_types_import() -> anyhow::Result<()> {
-    let (mut cmd, _out_dir) = Project::new("bad_interface_types_import")
+fn default_module_path_target_no_modules() {
+    let (mut cmd, out_dir) = Project::new("default_module_path_target_no_modules")
         .file(
             "src/lib.rs",
             r#"
-                use wasm_bindgen::prelude::*;
-
-                #[wasm_bindgen]
-                extern "C" {
-                    pub fn foo() -> Vec<u8>;
-                }
-
-                #[wasm_bindgen]
-                pub fn bar() {
-                    foo();
-                }
             "#,
         )
-        .file(
-            "Cargo.toml",
-            &format!(
-                "
-                    [package]
-                    name = \"bad_interface_types_import\"
-                    authors = []
-                    version = \"1.0.0\"
-                    edition = '2018'
-
-                    [lib]
-                    crate-type = [\"cdylib\"]
-
-                    [dependencies]
-                    wasm-bindgen = {{ path = '{}' }}
-
-                    [workspace]
-                ",
-                repo_root().display(),
-            ),
-        )
-        .wasm_bindgen("");
-    cmd.env("WASM_INTERFACE_TYPES", "1");
-    cmd.assert().failure().code(1).stderr(str::is_match(
+        .wasm_bindgen("--target no-modules");
+    cmd.assert().success();
+    let contents =
+        fs::read_to_string(out_dir.join("default_module_path_target_no_modules.js")).unwrap();
+    assert!(contents.contains(
         "\
-error: failed to generate a standard interface types section
+    if (typeof document !== 'undefined' && typeof document.currentScript !== 'null') {
+        script_src = new URL(document.currentScript.src, location.href).toString();
+    }",
+    ));
+    assert!(contents.contains(
+        "\
+    async function __wbg_init(input) {
+        if (wasm !== undefined) return wasm;
 
-Caused by:
-    0: in adapter function
-    1: import of global `foo` requires JS glue
-$",
-    )?);
-    Ok(())
+        if (typeof input === 'undefined' && script_src !== 'undefined') {
+            input = script_src.replace(/\\.js$/, '_bg.wasm');
+        }",
+    ));
+}
+
+#[test]
+fn omit_default_module_path_target_web() {
+    let (mut cmd, out_dir) = Project::new("omit_default_module_path_target_web")
+        .file(
+            "src/lib.rs",
+            r#"
+            "#,
+        )
+        .wasm_bindgen("--target web --omit-default-module-path");
+    cmd.assert().success();
+    let contents =
+        fs::read_to_string(out_dir.join("omit_default_module_path_target_web.js")).unwrap();
+    assert!(contents.contains(
+        "\
+async function __wbg_init(input) {
+    if (wasm !== undefined) return wasm;
+
+
+    const imports = __wbg_get_imports();",
+    ));
+}
+
+#[test]
+fn omit_default_module_path_target_no_modules() {
+    let (mut cmd, out_dir) = Project::new("omit_default_module_path_target_no_modules")
+        .file(
+            "src/lib.rs",
+            r#"
+            "#,
+        )
+        .wasm_bindgen("--target no-modules --omit-default-module-path");
+    cmd.assert().success();
+    let contents =
+        fs::read_to_string(out_dir.join("omit_default_module_path_target_no_modules.js")).unwrap();
+    assert!(contents.contains(
+        "\
+    async function __wbg_init(input) {
+        if (wasm !== undefined) return wasm;
+
+
+        const imports = __wbg_get_imports();",
+    ));
 }
 
 #[test]

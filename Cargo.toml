@@ -1,6 +1,6 @@
 [package]
 name = "wasm-bindgen"
-version = "0.2.68"
+version = "0.2.85"
 authors = ["The wasm-bindgen Developers"]
 license = "MIT/Apache-2.0"
 readme = "README.md"
@@ -24,27 +24,32 @@ default = ["spans", "std"]
 spans = ["wasm-bindgen-macro/spans"]
 std = []
 serde-serialize = ["serde", "serde_json", "std"]
-nightly = []
 enable-interning = ["std"]
 
 # Whether or not the `#[wasm_bindgen]` macro is strict and generates an error on
 # all unused attributes
 strict-macro = ["wasm-bindgen-macro/strict-macro"]
 
+# Enables gg-alloc as system allocator when using wasm-bindgen-test to check that large pointers
+# are handled correctly
+gg-alloc = ["wasm-bindgen-test/gg-alloc"]
+
 # This is only for debugging wasm-bindgen! No stability guarantees, so enable
 # this at your own peril!
-xxx_debug_only_print_generated_code = ["wasm-bindgen-macro/xxx_debug_only_print_generated_code"]
+xxx_debug_only_print_generated_code = [
+  "wasm-bindgen-macro/xxx_debug_only_print_generated_code",
+]
 
 [dependencies]
-wasm-bindgen-macro = { path = "crates/macro", version = "=0.2.68" }
+wasm-bindgen-macro = { path = "crates/macro", version = "=0.2.85" }
 serde = { version = "1.0", optional = true }
 serde_json = { version = "1.0", optional = true }
 cfg-if = "1.0.0"
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
-js-sys = { path = 'crates/js-sys', version = '0.3.45' }
-wasm-bindgen-test = { path = 'crates/test', version = '=0.3.18' }
-wasm-bindgen-futures = { path = 'crates/futures', version = '=0.4.18' }
+js-sys = { path = 'crates/js-sys', version = '0.3.62' }
+wasm-bindgen-test = { path = 'crates/test', version = '=0.3.35' }
+wasm-bindgen-futures = { path = 'crates/futures', version = '=0.4.35' }
 serde_derive = "1.0"
 wasm-bindgen-test-crate-a = { path = 'tests/crates/a', version = '0.1' }
 wasm-bindgen-test-crate-b = { path = 'tests/crates/b', version = '0.1' }
@@ -56,6 +61,7 @@ members = [
   "crates/js-sys",
   "crates/test",
   "crates/test/sample",
+  "crates/example-tests",
   "crates/typescript-tests",
   "crates/web-sys",
   "crates/webidl",
@@ -78,9 +84,12 @@ members = [
   "examples/raytrace-parallel",
   "examples/request-animation-frame",
   "examples/todomvc",
+  "examples/wasm-audio-worklet",
   "examples/wasm-in-wasm",
   "examples/wasm-in-wasm-imports",
+  "examples/wasm-in-web-worker",
   "examples/wasm2js",
+  "examples/weather_report",
   "examples/webaudio",
   "examples/webgl",
   "examples/webrtc_datachannel",
@@ -88,8 +97,10 @@ members = [
   "examples/webxr",
   "examples/without-a-bundler",
   "examples/without-a-bundler-no-modules",
+  "examples/synchronous-instantiation",
   "tests/no-std",
 ]
+resolver = "2"
 
 [patch.crates-io]
 wasm-bindgen = { path = '.' }

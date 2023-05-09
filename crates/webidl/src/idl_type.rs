@@ -1,5 +1,4 @@
 use proc_macro2::{Ident, Span};
-use syn;
 use wasm_bindgen_backend::util::{ident_ty, leading_colon_path_ty, raw_ident, rust_ident};
 use weedle::common::Identifier;
 use weedle::term;
@@ -30,6 +29,7 @@ pub(crate) enum IdlType<'a> {
     Symbol,
     Error,
     Callback,
+    Iterator,
 
     ArrayBuffer,
     DataView,
@@ -83,7 +83,7 @@ pub(crate) enum IdlType<'a> {
     Union(Vec<IdlType<'a>>),
 
     Any,
-    Void,
+    Undefined,
 
     UnknownInterface(&'a str),
 }
@@ -263,12 +263,13 @@ impl<'a> ToIdlType<'a> for RecordType<'a> {
     }
 }
 
-impl<'a> ToIdlType<'a> for StringType {
+impl<'a> ToIdlType<'a> for RecordKeyType<'a> {
     fn to_idl_type(&self, record: &FirstPassRecord<'a>) -> IdlType<'a> {
         match self {
-            StringType::Byte(t) => t.to_idl_type(record),
-            StringType::DOM(t) => t.to_idl_type(record),
-            StringType::USV(t) => t.to_idl_type(record),
+            RecordKeyType::Byte(t) => t.to_idl_type(record),
+            RecordKeyType::DOM(t) => t.to_idl_type(record),
+            RecordKeyType::USV(t) => t.to_idl_type(record),
+            RecordKeyType::NonAny(t) => t.to_idl_type(record),
         }
     }
 }
@@ -298,7 +299,7 @@ impl<'a> ToIdlType<'a> for ConstType<'a> {
 impl<'a> ToIdlType<'a> for ReturnType<'a> {
     fn to_idl_type(&self, record: &FirstPassRecord<'a>) -> IdlType<'a> {
         match self {
-            ReturnType::Void(t) => t.to_idl_type(record),
+            ReturnType::Undefined(t) => t.to_idl_type(record),
             ReturnType::Type(t) => t.to_idl_type(record),
         }
     }
@@ -331,6 +332,8 @@ impl<'a> ToIdlType<'a> for Identifier<'a> {
             IdlType::Enum(self.0)
         } else if record.callbacks.contains(self.0) {
             IdlType::Callback
+        } else if record.iterators.contains(self.0) {
+            IdlType::Iterator
         } else if let Some(data) = record.callback_interfaces.get(self.0) {
             IdlType::CallbackInterface {
                 name: self.0,
@@ -388,7 +391,7 @@ terms_to_idl_type! {
     Object => Object
     Octet => Octet
     Short => Short
-    Void => Void
+    Undefined => Undefined
     ArrayBuffer => ArrayBuffer
     DataView => DataView
     Error => Error
@@ -433,6 +436,7 @@ impl<'a> IdlType<'a> {
             IdlType::Symbol => dst.push_str("symbol"),
             IdlType::Error => dst.push_str("error"),
             IdlType::Callback => dst.push_str("callback"),
+            IdlType::Iterator => dst.push_str("iterator"),
 
             IdlType::ArrayBuffer => dst.push_str("array_buffer"),
             IdlType::DataView => dst.push_str("data_view"),
@@ -490,7 +494,7 @@ impl<'a> IdlType<'a> {
             }
 
             IdlType::Any => dst.push_str("any"),
-            IdlType::Void => dst.push_str("void"),
+            IdlType::Undefined => dst.push_str("undefined"),
         }
     }
 
@@ -598,10 +602,10 @@ impl<'a> IdlType<'a> {
                     None => Ok(None),
                 }
             }
-            IdlType::FrozenArray(_idl_type) => Err(TypeError::CannotConvert),
             // webidl sequences must always be returned as javascript `Array`s. They may accept
             // anything implementing the @@iterable interface.
-            IdlType::Sequence(_idl_type) => match pos {
+            // The same implementation is fine for `FrozenArray`
+            IdlType::FrozenArray(_idl_type) | IdlType::Sequence(_idl_type) => match pos {
                 TypePosition::Argument => Ok(js_value),
                 TypePosition::Return => Ok(js_sys("Array")),
             },
@@ -611,7 +615,7 @@ impl<'a> IdlType<'a> {
                 // Note that most union types have already been expanded to
                 // their components via `flatten`. Unions in a return position
                 // or dictionary fields, however, haven't been flattened, which
-                // means we may need to conver them to a `syn` type.
+                // means we may need to convert them to a `syn` type.
                 //
                 // Currently this does a bit of a "poor man's" tree traversal by
                 // saying that if all union members are interfaces we can assume
@@ -642,8 +646,9 @@ impl<'a> IdlType<'a> {
             }
 
             IdlType::Any => Ok(js_value),
-            IdlType::Void => Ok(None),
+            IdlType::Undefined => Ok(None),
             IdlType::Callback => Ok(js_sys("Function")),
+            IdlType::Iterator => Ok(js_sys("Iterator")),
             IdlType::UnknownInterface(_) => Err(TypeError::CannotConvert),
         }
     }

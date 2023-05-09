@@ -1,4 +1,7 @@
-import * as wasm from './reference_test_bg.wasm';
+let wasm;
+export function __wbg_set_wasm(val) {
+    wasm = val;
+}
 
 /**
 */
@@ -6,7 +9,7 @@ export function foo() {
     wasm.foo();
 }
 
-export const __wbindgen_init_externref_table = function() {
+export function __wbindgen_init_externref_table() {
     const table = wasm.__wbindgen_export_0;
     const offset = table.grow(4);
     table.set(0, undefined);

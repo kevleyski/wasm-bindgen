@@ -32,3 +32,17 @@ pub enum MyEnum {
     Two,
     Three,
 }
+
+#[wasm_bindgen(skip_typescript)]
+pub struct MyStruct {
+    pub field: i32,
+}
+
+macro_rules! generate_ts {
+    ($lit:literal) => {
+        #[wasm_bindgen(typescript_custom_section)]
+        const _: &str = $lit;
+    };
+}
+
+generate_ts!("");

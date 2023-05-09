@@ -8,7 +8,8 @@
 
 use anyhow::{anyhow, bail, Result};
 use walrus::{
-    ir::Value, ElementId, FunctionId, GlobalId, GlobalKind, InitExpr, MemoryId, Module, ValType,
+    ir::Value, ElementId, FunctionBuilder, FunctionId, FunctionKind, GlobalId, GlobalKind,
+    InitExpr, MemoryId, Module, ValType,
 };
 
 /// Get a Wasm module's canonical linear memory.
@@ -30,9 +31,6 @@ pub fn get_memory(module: &Module) -> Result<MemoryId> {
 }
 
 /// Get the `__shadow_stack_pointer`.
-///
-/// It must have been previously added to the module's exports via
-/// `export_shadow_stack_pointer`.
 pub fn get_shadow_stack_pointer(module: &Module) -> Option<GlobalId> {
     let candidates = module
         .globals
@@ -52,6 +50,29 @@ pub fn get_shadow_stack_pointer(module: &Module) -> Option<GlobalId> {
         0 => None,
         // TODO: have an actual check here.
         1 => Some(candidates[0].id()),
+        _ => None,
+    }
+}
+
+/// Get the `__tls_base`.
+pub fn get_tls_base(module: &Module) -> Option<GlobalId> {
+    let candidates = module
+        .exports
+        .iter()
+        .filter(|ex| ex.name == "__tls_base")
+        .filter_map(|ex| match ex.item {
+            walrus::ExportItem::Global(id) => Some(id),
+            _ => None,
+        })
+        .filter(|id| {
+            let global = module.globals.get(*id);
+
+            global.ty == ValType::I32
+        })
+        .collect::<Vec<_>>();
+
+    match candidates.len() {
+        1 => Some(candidates[0]),
         _ => None,
     }
 }
@@ -91,4 +112,39 @@ pub fn get_function_table_entry(module: &Module, idx: u32) -> Result<FunctionTab
         }
     }
     bail!("failed to find `{}` in function table", idx);
+}
+
+pub fn get_or_insert_start_builder(module: &mut Module) -> &mut FunctionBuilder {
+    let prev_start = {
+        match module.start {
+            Some(start) => match module.funcs.get_mut(start).kind {
+                FunctionKind::Import(_) => Err(Some(start)),
+                FunctionKind::Local(_) => Ok(start),
+                FunctionKind::Uninitialized(_) => unimplemented!(),
+            },
+            None => Err(None),
+        }
+    };
+
+    let id = match prev_start {
+        Ok(id) => id,
+        Err(prev_start) => {
+            let mut builder = FunctionBuilder::new(&mut module.types, &[], &[]);
+
+            if let Some(prev_start) = prev_start {
+                builder.func_body().call(prev_start);
+            }
+
+            let id = builder.finish(Vec::new(), &mut module.funcs);
+            module.start = Some(id);
+            id
+        }
+    };
+
+    module
+        .funcs
+        .get_mut(id)
+        .kind
+        .unwrap_local_mut()
+        .builder_mut()
 }

@@ -21,8 +21,6 @@ interface nsIStreamListener;
 [NamedConstructor=Image(optional unsigned long width, optional unsigned long height),
  Exposed=Window]
 interface HTMLImageElement : HTMLElement {
-  [HTMLConstructor] constructor();
-
            [CEReactions, SetterThrows]
            attribute DOMString alt;
            [CEReactions, SetterNeedsSubjectPrincipal=NonSystem, SetterThrows]
@@ -47,7 +45,7 @@ interface HTMLImageElement : HTMLElement {
   readonly attribute unsigned long naturalHeight;
   readonly attribute boolean complete;
            [NewObject]
-           Promise<void> decode();
+           Promise<undefined> decode();
 };
 
 // http://www.whatwg.org/specs/web-apps/current-work/#other-elements,-attributes-and-apis

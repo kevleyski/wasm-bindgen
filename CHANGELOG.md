@@ -1,4 +1,127 @@
 # `wasm-bindgen` Change Log
+--------------------------------------------------------------------------------
+
+## 0.2.81
+
+Released 2022-06-14.
+
+[changes](https://github.com/rustwasm/wasm-bindgen/compare/0.2.80...0.2.81)
+
+--------------------------------------------------------------------------------
+
+## 0.2.80
+
+Released 2022-04-04.
+
+[changes](https://github.com/rustwasm/wasm-bindgen/compare/0.2.79...0.2.80)
+
+--------------------------------------------------------------------------------
+
+## 0.2.79
+
+Released 2022-01-19.
+
+[changes](https://github.com/rustwasm/wasm-bindgen/compare/0.2.78...0.2.79)
+
+--------------------------------------------------------------------------------
+
+## 0.2.78
+
+Released 2021-09-15.
+
+[changes](https://github.com/rustwasm/wasm-bindgen/compare/0.2.77...0.2.78)
+
+--------------------------------------------------------------------------------
+
+## 0.2.77
+
+Released 2021-09-08.
+
+[changes](https://github.com/rustwasm/wasm-bindgen/compare/0.2.76...0.2.77)
+
+--------------------------------------------------------------------------------
+
+## 0.2.76
+
+Released 2021-08-19.
+
+[changes](https://github.com/rustwasm/wasm-bindgen/compare/0.2.75...0.2.76)
+
+--------------------------------------------------------------------------------
+
+## 0.2.75
+
+Released 2021-08-02.
+
+[changes](https://github.com/rustwasm/wasm-bindgen/compare/0.2.74...0.2.75)
+
+--------------------------------------------------------------------------------
+
+## 0.2.74
+
+Released 2021-05-10.
+
+[changes](https://github.com/rustwasm/wasm-bindgen/compare/0.2.73...0.2.74)
+
+--------------------------------------------------------------------------------
+
+## 0.2.73
+
+Released 2021-03-29.
+
+[changes](https://github.com/rustwasm/wasm-bindgen/compare/0.2.72...0.2.73)
+
+--------------------------------------------------------------------------------
+
+## 0.2.72
+
+Released 2021-03-18.
+
+[changes](https://github.com/rustwasm/wasm-bindgen/compare/0.2.71...0.2.72)
+
+--------------------------------------------------------------------------------
+
+## 0.2.71
+
+Released 2021-02-26.
+
+[changes](https://github.com/rustwasm/wasm-bindgen/compare/0.2.70...0.2.71)
+
+--------------------------------------------------------------------------------
+
+## 0.2.70
+
+Released 2021-01-25.
+
+[changes](https://github.com/rustwasm/wasm-bindgen/compare/0.2.69...0.2.70)
+
+--------------------------------------------------------------------------------
+
+## 0.2.69
+
+Released 2020-11-30.
+
+### Added
+
+* Unstable bindings for WebBluetooth have been added.
+  [#2311](https://github.com/rustwasm/wasm-bindgen/pull/2311)
+
+* Unstable bindings for WebUSB have been added.
+  [#2345](https://github.com/rustwasm/wasm-bindgen/pull/2345)
+
+* Renaming a struct field with `js_name` is now supported.
+  [#2360](https://github.com/rustwasm/wasm-bindgen/pull/2360)
+
+* The WebGPU WebIDL has been updated.
+  [#2353](https://github.com/rustwasm/wasm-bindgen/pull/2353)
+
+### Fixed
+
+* The ImageCapture APIs of web-sys have been moved to unstable and were fixed.
+  [#2348](https://github.com/rustwasm/wasm-bindgen/pull/2348)
+
+* Bindings for `waitAsync` have been updated.
+  [#2362](https://github.com/rustwasm/wasm-bindgen/pull/2362)
 
 --------------------------------------------------------------------------------
 
@@ -296,7 +419,7 @@ Released 2020-03-03.
   tightended up a bit.
   [#1987](https://github.com/rustwasm/wasm-bindgen/pull/1987)
 
-* The `self` identifier is no longe used on the `no-modules` target, making it a
+* The `self` identifier is no longer used on the `no-modules` target, making it a
   bit more flexible in more environments.
   [#1995](https://github.com/rustwasm/wasm-bindgen/pull/1995)
 
@@ -539,7 +662,7 @@ Released 2019-08-14.
 * Add binding for `Element.getElementsByClassName`.
   [#1665](https://github.com/rustwasm/wasm-bindgen/pull/1665)
 
-* `PartialEq` and `Eq` are now implementd for all `web-sys` types.
+* `PartialEq` and `Eq` are now implemented for all `web-sys` types.
   [#1673](https://github.com/rustwasm/wasm-bindgen/pull/1673)
 
 * The `wasm-bindgen-futures` crate now has support for futures when the
@@ -670,7 +793,7 @@ Released 2019-06-14.
 * Bindings for `Array#flat` and `Array#flatMap` have been added.
   [#1573](https://github.com/rustwasm/wasm-bindgen/pull/1573)
 
-* All `#[wasm_bindgen]` types now `AsRef` to themslves.
+* All `#[wasm_bindgen]` types now `AsRef` to themselves.
   [#1583](https://github.com/rustwasm/wasm-bindgen/pull/1583)
 
 * When using `--target web` the path passed to `init` is no longer required.
@@ -855,8 +978,7 @@ Released 2019-04-10.
 
 ### Added
 
-* Initial support for transitive NPM dependencies has been added, although
-  support has not fully landed in `wasm-pack` yet so it's not 100% integrated.
+* Initial support for transitive NPM dependencies has been added.
   [#1305](https://github.com/rustwasm/wasm-bindgen/pull/1305)
 
 * The `constructor` property of `Object` is now bound in `js-sys`.
@@ -995,7 +1117,7 @@ Released 2019-03-04.
   landed and is enabled with `WASM_BINDGEN_ANYREF=1`.
   [#1002](https://github.com/rustwasm/wasm-bindgen/pull/1002)
 
-* Support fot the new browser `TextEncode#encodeInto` API has been added.
+* Support for the new browser `TextEncode#encodeInto` API has been added.
   [#1279](https://github.com/rustwasm/wasm-bindgen/pull/1279)
 
 * JS doc comments are now added to TypeScript bindings in addition to the JS

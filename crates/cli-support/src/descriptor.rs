@@ -28,6 +28,7 @@ tys! {
     STRING
     REF
     REFMUT
+    LONGREF
     SLICE
     VECTOR
     EXTERNREF
@@ -36,6 +37,7 @@ tys! {
     RUST_STRUCT
     CHAR
     OPTIONAL
+    RESULT
     UNIT
     CLAMPED
 }
@@ -68,6 +70,7 @@ pub enum Descriptor {
     RustStruct(String),
     Char,
     Option(Box<Descriptor>),
+    Result(Box<Descriptor>),
     Unit,
 }
 
@@ -76,6 +79,7 @@ pub struct Function {
     pub arguments: Vec<Descriptor>,
     pub shim_idx: u32,
     pub ret: Descriptor,
+    pub inner_ret: Option<Descriptor>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -86,7 +90,7 @@ pub struct Closure {
     pub mutable: bool,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum VectorKind {
     I8,
     U8,
@@ -101,6 +105,7 @@ pub enum VectorKind {
     F64,
     String,
     Externref,
+    NamedExternref(String),
 }
 
 impl Descriptor {
@@ -128,9 +133,19 @@ impl Descriptor {
             CLOSURE => Descriptor::Closure(Box::new(Closure::decode(data))),
             REF => Descriptor::Ref(Box::new(Descriptor::_decode(data, clamped))),
             REFMUT => Descriptor::RefMut(Box::new(Descriptor::_decode(data, clamped))),
+            LONGREF => {
+                // This descriptor basically just serves as a macro, where most things
+                // become normal `Ref`s, but long refs to externrefs become owned.
+                let contents = Descriptor::_decode(data, clamped);
+                match contents {
+                    Descriptor::Externref | Descriptor::NamedExternref(_) => contents,
+                    _ => Descriptor::Ref(Box::new(contents)),
+                }
+            }
             SLICE => Descriptor::Slice(Box::new(Descriptor::_decode(data, clamped))),
             VECTOR => Descriptor::Vector(Box::new(Descriptor::_decode(data, clamped))),
             OPTIONAL => Descriptor::Option(Box::new(Descriptor::_decode(data, clamped))),
+            RESULT => Descriptor::Result(Box::new(Descriptor::_decode(data, clamped))),
             CACHED_STRING => Descriptor::CachedString,
             STRING => Descriptor::String,
             EXTERNREF => Descriptor::Externref,
@@ -193,6 +208,7 @@ impl Descriptor {
             Descriptor::F32 => Some(VectorKind::F32),
             Descriptor::F64 => Some(VectorKind::F64),
             Descriptor::Externref => Some(VectorKind::Externref),
+            Descriptor::NamedExternref(ref name) => Some(VectorKind::NamedExternref(name.clone())),
             _ => None,
         }
     }
@@ -235,26 +251,30 @@ impl Function {
             arguments,
             shim_idx,
             ret: Descriptor::_decode(data, false),
+            inner_ret: Some(Descriptor::_decode(data, false)),
         }
     }
 }
 
 impl VectorKind {
-    pub fn js_ty(&self) -> &str {
+    pub fn js_ty(&self) -> String {
         match *self {
-            VectorKind::String => "string",
-            VectorKind::I8 => "Int8Array",
-            VectorKind::U8 => "Uint8Array",
-            VectorKind::ClampedU8 => "Uint8ClampedArray",
-            VectorKind::I16 => "Int16Array",
-            VectorKind::U16 => "Uint16Array",
-            VectorKind::I32 => "Int32Array",
-            VectorKind::U32 => "Uint32Array",
-            VectorKind::I64 => "BigInt64Array",
-            VectorKind::U64 => "BigUint64Array",
-            VectorKind::F32 => "Float32Array",
-            VectorKind::F64 => "Float64Array",
-            VectorKind::Externref => "any[]",
+            VectorKind::String => "string".to_string(),
+            VectorKind::I8 => "Int8Array".to_string(),
+            VectorKind::U8 => "Uint8Array".to_string(),
+            VectorKind::ClampedU8 => "Uint8ClampedArray".to_string(),
+            VectorKind::I16 => "Int16Array".to_string(),
+            VectorKind::U16 => "Uint16Array".to_string(),
+            VectorKind::I32 => "Int32Array".to_string(),
+            VectorKind::U32 => "Uint32Array".to_string(),
+            VectorKind::I64 => "BigInt64Array".to_string(),
+            VectorKind::U64 => "BigUint64Array".to_string(),
+            VectorKind::F32 => "Float32Array".to_string(),
+            VectorKind::F64 => "Float64Array".to_string(),
+            VectorKind::Externref => "any[]".to_string(),
+            VectorKind::NamedExternref(ref name) => {
+                format!("({})[]", name)
+            }
         }
     }
 
@@ -273,6 +293,7 @@ impl VectorKind {
             VectorKind::F32 => 4,
             VectorKind::F64 => 8,
             VectorKind::Externref => 4,
+            VectorKind::NamedExternref(_) => 4,
         }
     }
 }

@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 use std::fs;
 use std::iter::FromIterator;
 use std::path::{Path, PathBuf};
@@ -7,15 +7,15 @@ use std::ptr;
 use heck::{CamelCase, ShoutySnakeCase, SnakeCase};
 use proc_macro2::{Ident, TokenStream};
 use quote::quote;
-use syn;
 use wasm_bindgen_backend::util::{ident_ty, raw_ident, rust_ident};
-use weedle;
 use weedle::attribute::{ExtendedAttribute, ExtendedAttributeList, IdentifierOrString};
-use weedle::literal::{ConstValue, FloatLit, IntegerLit};
+use weedle::common::Identifier;
+use weedle::literal::{ConstValue as ConstValueLit, FloatLit, IntegerLit};
+use weedle::types::{MayBeNull, NonAnyType, SingleType};
 
-use crate::constants::IMMUTABLE_SLICE_WHITELIST;
+use crate::constants::{FIXED_INTERFACES, IMMUTABLE_SLICE_WHITELIST};
 use crate::first_pass::{FirstPassRecord, OperationData, OperationId, Signature};
-use crate::generator::{InterfaceConstValue, InterfaceMethod, InterfaceMethodKind};
+use crate::generator::{ConstValue, InterfaceMethod, InterfaceMethodKind};
 use crate::idl_type::{IdlType, ToIdlType};
 use crate::Options;
 
@@ -102,20 +102,16 @@ pub(crate) fn array(base_ty: &str, pos: TypePosition, immutable: bool) -> syn::T
 }
 
 /// Map a webidl const value to the correct wasm-bindgen const value
-pub fn webidl_const_v_to_backend_const_v(v: &ConstValue) -> InterfaceConstValue {
+pub fn webidl_const_v_to_backend_const_v(v: &ConstValueLit) -> ConstValue {
     use std::f64::{INFINITY, NAN, NEG_INFINITY};
 
     match *v {
-        ConstValue::Boolean(b) => InterfaceConstValue::BooleanLiteral(b.0),
-        ConstValue::Float(FloatLit::NegInfinity(_)) => {
-            InterfaceConstValue::FloatLiteral(NEG_INFINITY)
-        }
-        ConstValue::Float(FloatLit::Infinity(_)) => InterfaceConstValue::FloatLiteral(INFINITY),
-        ConstValue::Float(FloatLit::NaN(_)) => InterfaceConstValue::FloatLiteral(NAN),
-        ConstValue::Float(FloatLit::Value(s)) => {
-            InterfaceConstValue::FloatLiteral(s.0.parse().unwrap())
-        }
-        ConstValue::Integer(lit) => {
+        ConstValueLit::Boolean(b) => ConstValue::BooleanLiteral(b.0),
+        ConstValueLit::Float(FloatLit::NegInfinity(_)) => ConstValue::FloatLiteral(NEG_INFINITY),
+        ConstValueLit::Float(FloatLit::Infinity(_)) => ConstValue::FloatLiteral(INFINITY),
+        ConstValueLit::Float(FloatLit::NaN(_)) => ConstValue::FloatLiteral(NAN),
+        ConstValueLit::Float(FloatLit::Value(s)) => ConstValue::FloatLiteral(s.0.parse().unwrap()),
+        ConstValueLit::Integer(lit) => {
             let mklit = |orig_text: &str, base: u32, offset: usize| {
                 let (negative, text) = if orig_text.starts_with("-") {
                     (true, &orig_text[1..])
@@ -123,7 +119,7 @@ pub fn webidl_const_v_to_backend_const_v(v: &ConstValue) -> InterfaceConstValue 
                     (false, orig_text)
                 };
                 if text == "0" {
-                    return InterfaceConstValue::SignedIntegerLiteral(0);
+                    return ConstValue::SignedIntegerLiteral(0);
                 }
                 let text = &text[offset..];
                 let n = u64::from_str_radix(text, base)
@@ -134,9 +130,9 @@ pub fn webidl_const_v_to_backend_const_v(v: &ConstValue) -> InterfaceConstValue 
                     } else {
                         n.wrapping_neg() as i64
                     };
-                    InterfaceConstValue::SignedIntegerLiteral(n)
+                    ConstValue::SignedIntegerLiteral(n)
                 } else {
-                    InterfaceConstValue::UnsignedIntegerLiteral(n)
+                    ConstValue::UnsignedIntegerLiteral(n)
                 }
             };
             match lit {
@@ -145,7 +141,7 @@ pub fn webidl_const_v_to_backend_const_v(v: &ConstValue) -> InterfaceConstValue 
                 IntegerLit::Dec(h) => mklit(h.0, 10, 0),
             }
         }
-        ConstValue::Null(_) => unimplemented!(),
+        ConstValueLit::Null(_) => unimplemented!(),
     }
 }
 
@@ -204,6 +200,7 @@ impl<'src> FirstPassRecord<'src> {
         id: &OperationId<'src>,
         data: &OperationData<'src>,
         unstable: bool,
+        unstable_types: &HashSet<Identifier>,
     ) -> Vec<InterfaceMethod> {
         let is_static = data.is_static;
 
@@ -297,7 +294,7 @@ impl<'src> FirstPassRecord<'src> {
             // > value of a type corresponding to the interface the
             // > `[Constructor]` extended attribute appears on, **or throw an
             // > exception**.
-            OperationId::Constructor => {
+            OperationId::Constructor(_) => {
                 ("new", InterfaceMethodKind::Constructor(None), false, true)
             }
             OperationId::NamedConstructor(n) => (
@@ -437,6 +434,21 @@ impl<'src> FirstPassRecord<'src> {
                     .map(|(idl_type, orig_arg)| (orig_arg.name.to_string(), idl_type)),
             );
 
+            // Stable types can have methods that have unstable argument types.
+            // If any of the arguments types are `unstable` then this method is downgraded
+            // to be unstable.
+            let has_unstable_args = signature
+                .orig
+                .args
+                .iter()
+                .any(|arg| is_type_unstable(arg.ty, unstable_types))
+                | signature
+                    .args
+                    .iter()
+                    .any(|arg| is_idl_type_unstable(arg, unstable_types));
+
+            let unstable = unstable || data.stability.is_unstable() || has_unstable_args;
+
             if let Some(arguments) = arguments {
                 if let Ok(ret_ty) = ret_ty.to_syn_type(TypePosition::Return) {
                     ret.push(InterfaceMethod {
@@ -486,6 +498,13 @@ impl<'src> FirstPassRecord<'src> {
                 }
             }
         }
+
+        for interface in &mut ret {
+            if let Some(fixed) = FIXED_INTERFACES.get(&interface.name.to_string().as_ref()) {
+                interface.name = rust_ident(fixed);
+            }
+        }
+
         return ret;
     }
 
@@ -502,6 +521,7 @@ impl<'src> FirstPassRecord<'src> {
     fn maybe_adjust<'a>(&self, mut idl_type: IdlType<'a>, id: &'a OperationId) -> IdlType<'a> {
         let op = match id {
             OperationId::Operation(Some(op)) => op,
+            OperationId::Constructor(Some(op)) => op,
             _ => return idl_type,
         };
 
@@ -510,6 +530,23 @@ impl<'src> FirstPassRecord<'src> {
         }
 
         idl_type
+    }
+}
+
+pub fn is_type_unstable(ty: &weedle::types::Type, unstable_types: &HashSet<Identifier>) -> bool {
+    match ty {
+        weedle::types::Type::Single(SingleType::NonAny(NonAnyType::Identifier(i))) => {
+            // Check if the type in the unstable type list
+            unstable_types.contains(&i.type_)
+        }
+        _ => false,
+    }
+}
+
+fn is_idl_type_unstable(ty: &IdlType, unstable_types: &HashSet<Identifier>) -> bool {
+    match ty {
+        IdlType::Interface(name) => unstable_types.contains(&Identifier(name)),
+        _ => false,
     }
 }
 
@@ -649,4 +686,47 @@ pub fn get_cfg_features(options: &Options, features: &BTreeSet<String>) -> Optio
             Some(syn::parse_quote!( #[cfg(all(#features))] ))
         }
     }
+}
+
+pub fn nullable(mut ty: weedle::types::Type) -> weedle::types::Type {
+    use weedle::types::Type;
+
+    fn make_nullable<T>(mb: &mut MayBeNull<T>) {
+        mb.q_mark = Some(weedle::term::QMark);
+    }
+
+    match &mut ty {
+        Type::Single(SingleType::Any(_) | SingleType::NonAny(NonAnyType::Promise(_))) => (),
+        Type::Single(SingleType::NonAny(NonAnyType::Integer(mb))) => make_nullable(mb),
+        Type::Single(SingleType::NonAny(NonAnyType::FloatingPoint(mb))) => make_nullable(mb),
+        Type::Single(SingleType::NonAny(NonAnyType::Boolean(mb))) => make_nullable(mb),
+        Type::Single(SingleType::NonAny(NonAnyType::Byte(mb))) => make_nullable(mb),
+        Type::Single(SingleType::NonAny(NonAnyType::Octet(mb))) => make_nullable(mb),
+        Type::Single(SingleType::NonAny(NonAnyType::ByteString(mb))) => make_nullable(mb),
+        Type::Single(SingleType::NonAny(NonAnyType::DOMString(mb))) => make_nullable(mb),
+        Type::Single(SingleType::NonAny(NonAnyType::USVString(mb))) => make_nullable(mb),
+        Type::Single(SingleType::NonAny(NonAnyType::Sequence(mb))) => make_nullable(mb),
+        Type::Single(SingleType::NonAny(NonAnyType::Object(mb))) => make_nullable(mb),
+        Type::Single(SingleType::NonAny(NonAnyType::Symbol(mb))) => make_nullable(mb),
+        Type::Single(SingleType::NonAny(NonAnyType::Error(mb))) => make_nullable(mb),
+        Type::Single(SingleType::NonAny(NonAnyType::ArrayBuffer(mb))) => make_nullable(mb),
+        Type::Single(SingleType::NonAny(NonAnyType::DataView(mb))) => make_nullable(mb),
+        Type::Single(SingleType::NonAny(NonAnyType::Int8Array(mb))) => make_nullable(mb),
+        Type::Single(SingleType::NonAny(NonAnyType::Int16Array(mb))) => make_nullable(mb),
+        Type::Single(SingleType::NonAny(NonAnyType::Int32Array(mb))) => make_nullable(mb),
+        Type::Single(SingleType::NonAny(NonAnyType::Uint8Array(mb))) => make_nullable(mb),
+        Type::Single(SingleType::NonAny(NonAnyType::Uint16Array(mb))) => make_nullable(mb),
+        Type::Single(SingleType::NonAny(NonAnyType::Uint32Array(mb))) => make_nullable(mb),
+        Type::Single(SingleType::NonAny(NonAnyType::Uint8ClampedArray(mb))) => make_nullable(mb),
+        Type::Single(SingleType::NonAny(NonAnyType::Float32Array(mb))) => make_nullable(mb),
+        Type::Single(SingleType::NonAny(NonAnyType::Float64Array(mb))) => make_nullable(mb),
+        Type::Single(SingleType::NonAny(NonAnyType::ArrayBufferView(mb))) => make_nullable(mb),
+        Type::Single(SingleType::NonAny(NonAnyType::BufferSource(mb))) => make_nullable(mb),
+        Type::Single(SingleType::NonAny(NonAnyType::FrozenArrayType(mb))) => make_nullable(mb),
+        Type::Single(SingleType::NonAny(NonAnyType::RecordType(mb))) => make_nullable(mb),
+        Type::Single(SingleType::NonAny(NonAnyType::Identifier(mb))) => make_nullable(mb),
+        Type::Union(mb) => make_nullable(mb),
+    }
+
+    ty
 }

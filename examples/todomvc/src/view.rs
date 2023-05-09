@@ -5,7 +5,6 @@ use crate::store::ItemList;
 use crate::{Message, Scheduler};
 use std::cell::RefCell;
 use std::rc::Rc;
-use wasm_bindgen::JsCast;
 
 use crate::template::Template;
 
@@ -86,7 +85,7 @@ impl View {
             None => return,
         };
         let sched = self.sched.clone();
-        let set_page = Closure::wrap(Box::new(move || {
+        let set_page = Closure::<dyn FnMut()>::new(move || {
             if let Some(location) = document.location() {
                 if let Ok(hash) = location.hash() {
                     if let Ok(sched) = &(sched.try_borrow_mut()) {
@@ -94,7 +93,7 @@ impl View {
                     }
                 }
             }
-        }) as Box<dyn FnMut()>);
+        });
 
         let window_et: web_sys::EventTarget = window.into();
         window_et

@@ -1,6 +1,5 @@
 use js_sys::Reflect;
 use wasm_bindgen::prelude::*;
-use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{
     MessageEvent, RtcDataChannelEvent, RtcPeerConnection, RtcPeerConnectionIceEvent, RtcSdpType,
@@ -23,7 +22,7 @@ extern "C" {
 }
 
 #[wasm_bindgen(start)]
-pub async fn start() -> Result<(), JsValue> {
+async fn start() -> Result<(), JsValue> {
     /*
      * Set up PeerConnections
      * pc1 <=> pc2
@@ -36,7 +35,7 @@ pub async fn start() -> Result<(), JsValue> {
 
     /*
      * Create DataChannel on pc1 to negotiate
-     * Message will be shonw here after connection established
+     * Message will be shown here after connection established
      *
      */
     let dc1 = pc1.create_data_channel("my-data-channel");
@@ -44,38 +43,39 @@ pub async fn start() -> Result<(), JsValue> {
 
     let dc1_clone = dc1.clone();
     let onmessage_callback =
-        Closure::wrap(
-            Box::new(move |ev: MessageEvent| match ev.data().as_string() {
-                Some(message) => {
-                    console_warn!("{:?}", message);
-                    dc1_clone.send_with_str("Pong from pc1.dc!").unwrap();
-                }
-                None => {}
-            }) as Box<dyn FnMut(MessageEvent)>,
-        );
+        Closure::<dyn FnMut(_)>::new(move |ev: MessageEvent| match ev.data().as_string() {
+            Some(message) => {
+                console_warn!("{:?}", message);
+                dc1_clone.send_with_str("Pong from pc1.dc!").unwrap();
+            }
+            None => {}
+        });
     dc1.set_onmessage(Some(onmessage_callback.as_ref().unchecked_ref()));
     onmessage_callback.forget();
 
     /*
-     * If negotiaion has done, this closure will be called
+     * If negotiation has done, this closure will be called
      *
      */
-    let ondatachannel_callback = Closure::wrap(Box::new(move |ev: RtcDataChannelEvent| {
+    let ondatachannel_callback = Closure::<dyn FnMut(_)>::new(move |ev: RtcDataChannelEvent| {
         let dc2 = ev.channel();
         console_log!("pc2.ondatachannel!: {:?}", dc2.label());
 
         let onmessage_callback =
-            Closure::wrap(
-                Box::new(move |ev: MessageEvent| match ev.data().as_string() {
-                    Some(message) => console_warn!("{:?}", message),
-                    None => {}
-                }) as Box<dyn FnMut(MessageEvent)>,
-            );
+            Closure::<dyn FnMut(_)>::new(move |ev: MessageEvent| match ev.data().as_string() {
+                Some(message) => console_warn!("{:?}", message),
+                None => {}
+            });
         dc2.set_onmessage(Some(onmessage_callback.as_ref().unchecked_ref()));
         onmessage_callback.forget();
 
-        dc2.send_with_str("Ping from pc2.dc!").unwrap();
-    }) as Box<dyn FnMut(RtcDataChannelEvent)>);
+        let dc2_clone = dc2.clone();
+        let onopen_callback = Closure::<dyn FnMut()>::new(move || {
+            dc2_clone.send_with_str("Ping from pc2.dc!").unwrap();
+        });
+        dc2.set_onopen(Some(onopen_callback.as_ref().unchecked_ref()));
+        onopen_callback.forget();
+    });
     pc2.set_ondatachannel(Some(ondatachannel_callback.as_ref().unchecked_ref()));
     ondatachannel_callback.forget();
 
@@ -85,31 +85,25 @@ pub async fn start() -> Result<(), JsValue> {
      */
     let pc2_clone = pc2.clone();
     let onicecandidate_callback1 =
-        Closure::wrap(
-            Box::new(move |ev: RtcPeerConnectionIceEvent| match ev.candidate() {
-                Some(candidate) => {
-                    console_log!("pc1.onicecandidate: {:#?}", candidate.candidate());
-                    let _ =
-                        pc2_clone.add_ice_candidate_with_opt_rtc_ice_candidate(Some(&candidate));
-                }
-                None => {}
-            }) as Box<dyn FnMut(RtcPeerConnectionIceEvent)>,
-        );
+        Closure::<dyn FnMut(_)>::new(move |ev: RtcPeerConnectionIceEvent| match ev.candidate() {
+            Some(candidate) => {
+                console_log!("pc1.onicecandidate: {:#?}", candidate.candidate());
+                let _ = pc2_clone.add_ice_candidate_with_opt_rtc_ice_candidate(Some(&candidate));
+            }
+            None => {}
+        });
     pc1.set_onicecandidate(Some(onicecandidate_callback1.as_ref().unchecked_ref()));
     onicecandidate_callback1.forget();
 
     let pc1_clone = pc1.clone();
     let onicecandidate_callback2 =
-        Closure::wrap(
-            Box::new(move |ev: RtcPeerConnectionIceEvent| match ev.candidate() {
-                Some(candidate) => {
-                    console_log!("pc2.onicecandidate: {:#?}", candidate.candidate());
-                    let _ =
-                        pc1_clone.add_ice_candidate_with_opt_rtc_ice_candidate(Some(&candidate));
-                }
-                None => {}
-            }) as Box<dyn FnMut(RtcPeerConnectionIceEvent)>,
-        );
+        Closure::<dyn FnMut(_)>::new(move |ev: RtcPeerConnectionIceEvent| match ev.candidate() {
+            Some(candidate) => {
+                console_log!("pc2.onicecandidate: {:#?}", candidate.candidate());
+                let _ = pc1_clone.add_ice_candidate_with_opt_rtc_ice_candidate(Some(&candidate));
+            }
+            None => {}
+        });
     pc2.set_onicecandidate(Some(onicecandidate_callback2.as_ref().unchecked_ref()));
     onicecandidate_callback2.forget();
 

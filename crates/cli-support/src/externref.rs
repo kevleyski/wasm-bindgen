@@ -70,10 +70,11 @@ pub fn process(module: &mut Module) -> Result<()> {
     aux.externref_table = Some(meta.table);
     if module_needs_externref_metadata(&aux, section) {
         aux.externref_alloc = meta.alloc;
+        aux.externref_drop = meta.drop;
         aux.externref_drop_slice = meta.drop_slice;
     }
 
-    // Additonally we may need to update some adapter instructions other than
+    // Additionally we may need to update some adapter instructions other than
     // those found for the externref pass. These are some general "fringe support"
     // things necessary to get absolutely everything working.
     for (_, adapter) in section.adapters.iter_mut() {
@@ -98,7 +99,7 @@ pub fn process(module: &mut Module) -> Result<()> {
                         AuxImport::Intrinsic(Intrinsic::ExternrefHeapLiveCount) => {}
                         _ => continue,
                     }
-                    instr.instr = Instruction::Standard(wit_walrus::Instruction::CallCore(id));
+                    instr.instr = Instruction::CallCore(id);
                 }
 
                 // Optional externref values are now managed in the wasm module, so
@@ -108,6 +109,19 @@ pub fn process(module: &mut Module) -> Result<()> {
                 } => {
                     *table_and_alloc = meta.alloc.map(|id| (meta.table, id));
                 }
+
+                Instruction::ExternrefLoadOwned {
+                    ref mut table_and_drop,
+                }
+                | Instruction::UnwrapResult {
+                    ref mut table_and_drop,
+                }
+                | Instruction::UnwrapResultString {
+                    ref mut table_and_drop,
+                } => {
+                    *table_and_drop = meta.drop.map(|id| (meta.table, id));
+                }
+                Instruction::CachedStringLoad { ref mut table, .. } => *table = Some(meta.table),
                 _ => continue,
             };
         }
@@ -167,7 +181,7 @@ fn import_xform(
     while let Some((i, instr)) = iter.next() {
         match instr.instr {
             Instruction::CallAdapter(_) => break,
-            Instruction::ExternrefLoadOwned | Instruction::TableGet => {
+            Instruction::ExternrefLoadOwned { .. } | Instruction::TableGet => {
                 let owned = match instr.instr {
                     Instruction::TableGet => false,
                     _ => true,
@@ -185,7 +199,7 @@ fn import_xform(
                 args.push(Some(arg));
                 to_delete.push(i);
             }
-            Instruction::Standard(wit_walrus::Instruction::ArgGet(n)) => {
+            Instruction::ArgGet(n) => {
                 args.push(Some(Arg {
                     idx: n as usize,
                     externref: None,
@@ -289,13 +303,16 @@ fn export_xform(cx: &mut Context, export: Export, instrs: &mut Vec<InstructionDa
         }
     }
 
-    // If one of the instructions after the call is an `ExternrefLoadOwned` then we
-    // know that the function returned an externref. Currently `&'static Externref`
-    // can't be done as a return value, so this is the only case we handle here.
+    // If one of the instructions after the call is an `ExternrefLoadOwned`,
+    // and a retptr isn't used, the function must return an externref.
+    // Currently `&'static Externref` can't be done as a return value,
+    // so we don't need to handle that possibility.
+    let mut uses_retptr = false;
     let mut ret_externref = false;
     while let Some((i, instr)) = iter.next() {
         match instr.instr {
-            Instruction::ExternrefLoadOwned => {
+            Instruction::LoadRetptr { .. } => uses_retptr = true,
+            Instruction::ExternrefLoadOwned { .. } if !uses_retptr => {
                 ret_externref = true;
                 to_delete.push(i);
             }
@@ -351,31 +368,31 @@ fn module_needs_externref_metadata(aux: &WasmBindgenAux, section: &NonstandardWi
         };
         instructions.iter().any(|instr| match instr.instr {
             VectorToMemory {
-                kind: VectorKind::Externref,
+                kind: VectorKind::Externref | VectorKind::NamedExternref(_),
                 ..
             }
             | MutableSliceToMemory {
-                kind: VectorKind::Externref,
+                kind: VectorKind::Externref | VectorKind::NamedExternref(_),
                 ..
             }
             | OptionVector {
-                kind: VectorKind::Externref,
+                kind: VectorKind::Externref | VectorKind::NamedExternref(_),
                 ..
             }
             | VectorLoad {
-                kind: VectorKind::Externref,
+                kind: VectorKind::Externref | VectorKind::NamedExternref(_),
                 ..
             }
             | OptionVectorLoad {
-                kind: VectorKind::Externref,
+                kind: VectorKind::Externref | VectorKind::NamedExternref(_),
                 ..
             }
             | View {
-                kind: VectorKind::Externref,
+                kind: VectorKind::Externref | VectorKind::NamedExternref(_),
                 ..
             }
             | OptionView {
-                kind: VectorKind::Externref,
+                kind: VectorKind::Externref | VectorKind::NamedExternref(_),
                 ..
             } => true,
             _ => false,
@@ -394,7 +411,7 @@ pub fn force_contiguous_elements(module: &mut Module) -> Result<()> {
     // Here we take a look at all element segments in the module to see if we
     // need to split them.
     for segment in module.elements.iter_mut() {
-        // If this segment has all-`Some` members then it's alrady contiguous
+        // If this segment has all-`Some` members then it's already contiguous
         // and we can skip it.
         if segment.members.iter().all(|m| m.is_some()) {
             continue;

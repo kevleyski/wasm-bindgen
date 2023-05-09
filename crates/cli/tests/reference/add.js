@@ -1,4 +1,7 @@
-import * as wasm from './reference_test_bg.wasm';
+let wasm;
+export function __wbg_set_wasm(val) {
+    wasm = val;
+}
 
 /**
 * @param {number} a
@@ -6,7 +9,7 @@ import * as wasm from './reference_test_bg.wasm';
 * @returns {number}
 */
 export function add_u32(a, b) {
-    var ret = wasm.add_u32(a, b);
+    const ret = wasm.add_u32(a, b);
     return ret >>> 0;
 }
 
@@ -16,7 +19,7 @@ export function add_u32(a, b) {
 * @returns {number}
 */
 export function add_i32(a, b) {
-    var ret = wasm.add_i32(a, b);
+    const ret = wasm.add_i32(a, b);
     return ret;
 }
 
