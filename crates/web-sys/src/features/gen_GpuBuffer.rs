@@ -1,4 +1,5 @@
 #![allow(unused_imports)]
+#![allow(clippy::all)]
 use super::*;
 use wasm_bindgen::prelude::*;
 #[cfg(web_sys_unstable_apis)]
@@ -59,7 +60,7 @@ extern "C" {
     #[doc = ""]
     #[doc = "*This API is unstable and requires `--cfg=web_sys_unstable_apis` to be activated, as"]
     #[doc = "[described in the `wasm-bindgen` guide](https://rustwasm.github.io/docs/wasm-bindgen/web-sys/unstable-apis.html)*"]
-    pub fn label(this: &GpuBuffer) -> String;
+    pub fn label(this: &GpuBuffer) -> ::alloc::string::String;
     #[cfg(web_sys_unstable_apis)]
     # [wasm_bindgen (structural , method , setter , js_class = "GPUBuffer" , js_name = label)]
     #[doc = "Setter for the `label` field of this object."]
@@ -83,7 +84,7 @@ extern "C" {
     #[doc = "[described in the `wasm-bindgen` guide](https://rustwasm.github.io/docs/wasm-bindgen/web-sys/unstable-apis.html)*"]
     pub fn destroy(this: &GpuBuffer);
     #[cfg(web_sys_unstable_apis)]
-    # [wasm_bindgen (method , structural , js_class = "GPUBuffer" , js_name = getMappedRange)]
+    # [wasm_bindgen (catch , method , structural , js_class = "GPUBuffer" , js_name = getMappedRange)]
     #[doc = "The `getMappedRange()` method."]
     #[doc = ""]
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/GPUBuffer/getMappedRange)"]
@@ -92,9 +93,9 @@ extern "C" {
     #[doc = ""]
     #[doc = "*This API is unstable and requires `--cfg=web_sys_unstable_apis` to be activated, as"]
     #[doc = "[described in the `wasm-bindgen` guide](https://rustwasm.github.io/docs/wasm-bindgen/web-sys/unstable-apis.html)*"]
-    pub fn get_mapped_range(this: &GpuBuffer) -> ::js_sys::ArrayBuffer;
+    pub fn get_mapped_range(this: &GpuBuffer) -> Result<::js_sys::ArrayBuffer, JsValue>;
     #[cfg(web_sys_unstable_apis)]
-    # [wasm_bindgen (method , structural , js_class = "GPUBuffer" , js_name = getMappedRange)]
+    # [wasm_bindgen (catch , method , structural , js_class = "GPUBuffer" , js_name = getMappedRange)]
     #[doc = "The `getMappedRange()` method."]
     #[doc = ""]
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/GPUBuffer/getMappedRange)"]
@@ -103,9 +104,12 @@ extern "C" {
     #[doc = ""]
     #[doc = "*This API is unstable and requires `--cfg=web_sys_unstable_apis` to be activated, as"]
     #[doc = "[described in the `wasm-bindgen` guide](https://rustwasm.github.io/docs/wasm-bindgen/web-sys/unstable-apis.html)*"]
-    pub fn get_mapped_range_with_u32(this: &GpuBuffer, offset: u32) -> ::js_sys::ArrayBuffer;
+    pub fn get_mapped_range_with_u32(
+        this: &GpuBuffer,
+        offset: u32,
+    ) -> Result<::js_sys::ArrayBuffer, JsValue>;
     #[cfg(web_sys_unstable_apis)]
-    # [wasm_bindgen (method , structural , js_class = "GPUBuffer" , js_name = getMappedRange)]
+    # [wasm_bindgen (catch , method , structural , js_class = "GPUBuffer" , js_name = getMappedRange)]
     #[doc = "The `getMappedRange()` method."]
     #[doc = ""]
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/GPUBuffer/getMappedRange)"]
@@ -114,9 +118,12 @@ extern "C" {
     #[doc = ""]
     #[doc = "*This API is unstable and requires `--cfg=web_sys_unstable_apis` to be activated, as"]
     #[doc = "[described in the `wasm-bindgen` guide](https://rustwasm.github.io/docs/wasm-bindgen/web-sys/unstable-apis.html)*"]
-    pub fn get_mapped_range_with_f64(this: &GpuBuffer, offset: f64) -> ::js_sys::ArrayBuffer;
+    pub fn get_mapped_range_with_f64(
+        this: &GpuBuffer,
+        offset: f64,
+    ) -> Result<::js_sys::ArrayBuffer, JsValue>;
     #[cfg(web_sys_unstable_apis)]
-    # [wasm_bindgen (method , structural , js_class = "GPUBuffer" , js_name = getMappedRange)]
+    # [wasm_bindgen (catch , method , structural , js_class = "GPUBuffer" , js_name = getMappedRange)]
     #[doc = "The `getMappedRange()` method."]
     #[doc = ""]
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/GPUBuffer/getMappedRange)"]
@@ -129,9 +136,9 @@ extern "C" {
         this: &GpuBuffer,
         offset: u32,
         size: u32,
-    ) -> ::js_sys::ArrayBuffer;
+    ) -> Result<::js_sys::ArrayBuffer, JsValue>;
     #[cfg(web_sys_unstable_apis)]
-    # [wasm_bindgen (method , structural , js_class = "GPUBuffer" , js_name = getMappedRange)]
+    # [wasm_bindgen (catch , method , structural , js_class = "GPUBuffer" , js_name = getMappedRange)]
     #[doc = "The `getMappedRange()` method."]
     #[doc = ""]
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/GPUBuffer/getMappedRange)"]
@@ -144,9 +151,9 @@ extern "C" {
         this: &GpuBuffer,
         offset: f64,
         size: u32,
-    ) -> ::js_sys::ArrayBuffer;
+    ) -> Result<::js_sys::ArrayBuffer, JsValue>;
     #[cfg(web_sys_unstable_apis)]
-    # [wasm_bindgen (method , structural , js_class = "GPUBuffer" , js_name = getMappedRange)]
+    # [wasm_bindgen (catch , method , structural , js_class = "GPUBuffer" , js_name = getMappedRange)]
     #[doc = "The `getMappedRange()` method."]
     #[doc = ""]
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/GPUBuffer/getMappedRange)"]
@@ -159,9 +166,9 @@ extern "C" {
         this: &GpuBuffer,
         offset: u32,
         size: f64,
-    ) -> ::js_sys::ArrayBuffer;
+    ) -> Result<::js_sys::ArrayBuffer, JsValue>;
     #[cfg(web_sys_unstable_apis)]
-    # [wasm_bindgen (method , structural , js_class = "GPUBuffer" , js_name = getMappedRange)]
+    # [wasm_bindgen (catch , method , structural , js_class = "GPUBuffer" , js_name = getMappedRange)]
     #[doc = "The `getMappedRange()` method."]
     #[doc = ""]
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/GPUBuffer/getMappedRange)"]
@@ -174,7 +181,7 @@ extern "C" {
         this: &GpuBuffer,
         offset: f64,
         size: f64,
-    ) -> ::js_sys::ArrayBuffer;
+    ) -> Result<::js_sys::ArrayBuffer, JsValue>;
     #[cfg(web_sys_unstable_apis)]
     # [wasm_bindgen (method , structural , js_class = "GPUBuffer" , js_name = mapAsync)]
     #[doc = "The `mapAsync()` method."]

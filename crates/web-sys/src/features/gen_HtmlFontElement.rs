@@ -1,4 +1,5 @@
 #![allow(unused_imports)]
+#![allow(clippy::all)]
 use super::*;
 use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
@@ -17,7 +18,7 @@ extern "C" {
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/HTMLFontElement/color)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `HtmlFontElement`*"]
-    pub fn color(this: &HtmlFontElement) -> String;
+    pub fn color(this: &HtmlFontElement) -> ::alloc::string::String;
     # [wasm_bindgen (structural , method , setter , js_class = "HTMLFontElement" , js_name = color)]
     #[doc = "Setter for the `color` field of this object."]
     #[doc = ""]
@@ -31,7 +32,7 @@ extern "C" {
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/HTMLFontElement/face)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `HtmlFontElement`*"]
-    pub fn face(this: &HtmlFontElement) -> String;
+    pub fn face(this: &HtmlFontElement) -> ::alloc::string::String;
     # [wasm_bindgen (structural , method , setter , js_class = "HTMLFontElement" , js_name = face)]
     #[doc = "Setter for the `face` field of this object."]
     #[doc = ""]
@@ -45,7 +46,7 @@ extern "C" {
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/HTMLFontElement/size)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `HtmlFontElement`*"]
-    pub fn size(this: &HtmlFontElement) -> String;
+    pub fn size(this: &HtmlFontElement) -> ::alloc::string::String;
     # [wasm_bindgen (structural , method , setter , js_class = "HTMLFontElement" , js_name = size)]
     #[doc = "Setter for the `size` field of this object."]
     #[doc = ""]

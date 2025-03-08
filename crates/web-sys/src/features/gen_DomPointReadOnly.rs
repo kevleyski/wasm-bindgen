@@ -1,4 +1,5 @@
 #![allow(unused_imports)]
+#![allow(clippy::all)]
 use super::*;
 use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
@@ -82,7 +83,7 @@ extern "C" {
     # [wasm_bindgen (static_method_of = DomPointReadOnly , js_class = "DOMPointReadOnly" , js_name = fromPoint)]
     #[doc = "The `fromPoint()` method."]
     #[doc = ""]
-    #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/DOMPointReadOnly/fromPoint)"]
+    #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/DOMPointReadOnly/fromPoint_static)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `DomPointReadOnly`*"]
     pub fn from_point() -> DomPointReadOnly;
@@ -90,7 +91,7 @@ extern "C" {
     # [wasm_bindgen (static_method_of = DomPointReadOnly , js_class = "DOMPointReadOnly" , js_name = fromPoint)]
     #[doc = "The `fromPoint()` method."]
     #[doc = ""]
-    #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/DOMPointReadOnly/fromPoint)"]
+    #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/DOMPointReadOnly/fromPoint_static)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `DomPointInit`, `DomPointReadOnly`*"]
     pub fn from_point_with_other(other: &DomPointInit) -> DomPointReadOnly;

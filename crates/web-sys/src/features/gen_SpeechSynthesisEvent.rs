@@ -1,4 +1,5 @@
 #![allow(unused_imports)]
+#![allow(clippy::all)]
 use super::*;
 use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
@@ -46,7 +47,7 @@ extern "C" {
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/SpeechSynthesisEvent/name)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `SpeechSynthesisEvent`*"]
-    pub fn name(this: &SpeechSynthesisEvent) -> Option<String>;
+    pub fn name(this: &SpeechSynthesisEvent) -> Option<::alloc::string::String>;
     #[cfg(feature = "SpeechSynthesisEventInit")]
     #[wasm_bindgen(catch, constructor, js_class = "SpeechSynthesisEvent")]
     #[doc = "The `new SpeechSynthesisEvent(..)` constructor, creating a new instance of `SpeechSynthesisEvent`."]

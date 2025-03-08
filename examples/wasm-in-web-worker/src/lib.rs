@@ -7,7 +7,7 @@ use web_sys::{console, HtmlElement, HtmlInputElement, MessageEvent, Worker};
 ///
 /// This struct will be the main object which responds to messages passed to the
 /// worker. It stores the last number which it was passed to have a state. The
-/// statefulness is not is not required in this example but should show how
+/// statefulness is not required in this example but should show how
 /// larger, more complex scenarios with statefulness can be set up.
 #[wasm_bindgen]
 pub struct NumberEval {
@@ -28,10 +28,7 @@ impl NumberEval {
     /// * `number` - The number to be checked for being even/odd.
     pub fn is_even(&mut self, number: i32) -> bool {
         self.number = number;
-        match self.number % 2 {
-            0 => true,
-            _ => false,
-        }
+        self.number % 2 == 0
     }
 
     /// Get last number that was checked - this method is added to work with
@@ -49,10 +46,10 @@ pub fn startup() {
     // `Rc<RefCell>` following the interior mutability pattern. Here, it would
     // not be needed but we include the wrapping anyway as example.
     let worker_handle = Rc::new(RefCell::new(Worker::new("./worker.js").unwrap()));
-    console::log_1(&"Created a new worker from within WASM".into());
+    console::log_1(&"Created a new worker from within Wasm".into());
 
     // Pass the worker to the function which sets up the `oninput` callback.
-    setup_input_oninput_callback(worker_handle.clone());
+    setup_input_oninput_callback(worker_handle);
 }
 
 fn setup_input_oninput_callback(worker: Rc<RefCell<web_sys::Worker>>) {
@@ -118,8 +115,8 @@ fn setup_input_oninput_callback(worker: Rc<RefCell<web_sys::Worker>>) {
 
 /// Create a closure to act on the message returned by the worker
 fn get_on_msg_callback() -> Closure<dyn FnMut(MessageEvent)> {
-    let callback = Closure::new(move |event: MessageEvent| {
-        console::log_2(&"Received response: ".into(), &event.data().into());
+    Closure::new(move |event: MessageEvent| {
+        console::log_2(&"Received response: ".into(), &event.data());
 
         let result = match event.data().as_bool().unwrap() {
             true => "even",
@@ -133,7 +130,5 @@ fn get_on_msg_callback() -> Closure<dyn FnMut(MessageEvent)> {
             .dyn_ref::<HtmlElement>()
             .expect("#resultField should be a HtmlInputElement")
             .set_inner_text(result);
-    });
-
-    callback
+    })
 }

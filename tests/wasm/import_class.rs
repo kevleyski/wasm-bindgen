@@ -1,6 +1,7 @@
 //! dox
 
 #![deny(missing_docs)] // test that documenting public bindings is enough
+#![allow(clippy::redundant_clone)] // test specifically with cloned objects
 
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_test::*;
@@ -92,6 +93,7 @@ extern "C" {
     /// dox
     pub fn foo();
 
+    /// dox
     pub type Options;
     #[wasm_bindgen(constructor)]
     fn new() -> Options;
@@ -173,7 +175,6 @@ fn rename_type() {
 }
 
 #[wasm_bindgen_test]
-#[cfg(ignored)] // TODO: fix this before landing
 fn switch_methods() {
     assert!(!switch_methods_called());
     SwitchMethods::a();

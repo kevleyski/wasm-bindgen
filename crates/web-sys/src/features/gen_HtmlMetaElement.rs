@@ -1,4 +1,5 @@
 #![allow(unused_imports)]
+#![allow(clippy::all)]
 use super::*;
 use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
@@ -17,7 +18,7 @@ extern "C" {
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/HTMLMetaElement/name)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `HtmlMetaElement`*"]
-    pub fn name(this: &HtmlMetaElement) -> String;
+    pub fn name(this: &HtmlMetaElement) -> ::alloc::string::String;
     # [wasm_bindgen (structural , method , setter , js_class = "HTMLMetaElement" , js_name = name)]
     #[doc = "Setter for the `name` field of this object."]
     #[doc = ""]
@@ -31,7 +32,7 @@ extern "C" {
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/HTMLMetaElement/httpEquiv)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `HtmlMetaElement`*"]
-    pub fn http_equiv(this: &HtmlMetaElement) -> String;
+    pub fn http_equiv(this: &HtmlMetaElement) -> ::alloc::string::String;
     # [wasm_bindgen (structural , method , setter , js_class = "HTMLMetaElement" , js_name = httpEquiv)]
     #[doc = "Setter for the `httpEquiv` field of this object."]
     #[doc = ""]
@@ -45,7 +46,7 @@ extern "C" {
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/HTMLMetaElement/content)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `HtmlMetaElement`*"]
-    pub fn content(this: &HtmlMetaElement) -> String;
+    pub fn content(this: &HtmlMetaElement) -> ::alloc::string::String;
     # [wasm_bindgen (structural , method , setter , js_class = "HTMLMetaElement" , js_name = content)]
     #[doc = "Setter for the `content` field of this object."]
     #[doc = ""]
@@ -59,7 +60,7 @@ extern "C" {
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/HTMLMetaElement/scheme)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `HtmlMetaElement`*"]
-    pub fn scheme(this: &HtmlMetaElement) -> String;
+    pub fn scheme(this: &HtmlMetaElement) -> ::alloc::string::String;
     # [wasm_bindgen (structural , method , setter , js_class = "HTMLMetaElement" , js_name = scheme)]
     #[doc = "Setter for the `scheme` field of this object."]
     #[doc = ""]

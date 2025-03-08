@@ -8,6 +8,7 @@ extern "C" {
 }
 
 #[wasm_bindgen_test]
+#[allow(deprecated)]
 fn test_input_element() {
     let element = new_input();
     let location = web_sys::window().unwrap().location().href().unwrap();
@@ -40,19 +41,18 @@ fn test_input_element() {
     element.set_default_checked(true);
     assert!(element.default_checked(), "Should have an default_checked");
 
-    /*TODO fix
-        assert!(!element.checked(), "Shouldn't be checked");
-        element.set_checked(true);
-        assert!(element.checked(), "Should be checked");
-    */
+    assert!(element.checked(), "Should be checked");
+    element.set_checked(false);
+    assert!(!element.checked(), "Shouldn't be checked");
 
     assert!(!element.disabled(), "Shouldn't be disabled");
     element.set_disabled(true);
     assert!(element.disabled(), "Should be disabled");
 
     match element.form() {
-        None => assert!(true, "Shouldn't have a form"),
-        _ => assert!(false, "Shouldn't have a form"),
+        // Shouldn't have a form
+        None => (),
+        _ => unreachable!("Shouldn't have a form"),
     };
 
     assert_eq!(
@@ -93,14 +93,18 @@ fn test_input_element() {
 
     assert_eq!(element.height(), 0, "Should have no height");
     element.set_height(12);
-    assert_eq!(element.height(), 0, "Should have no height"); // Doesn't change, TODO check with get_attribute("height")=="12"
+    assert_eq!(element.height(), 0, "Should have no height");
+    assert_eq!(
+        element.get_attribute("height").unwrap(),
+        "12",
+        "The height attribute should be 12"
+    );
 
-    /*TODO fails in chrome
     element.set_type("checkbox");
+    element.set_indeterminate(true);
     assert!(element.indeterminate(), "Should be indeterminate");
-    element.set_checked(true);
+    element.set_indeterminate(false);
     assert!(!element.indeterminate(), "Shouldn't be indeterminate");
-    */
     /*TODO add tests
     pub fn indeterminate(&self) -> bool
     pub fn set_indeterminate(&self, indeterminate: bool)
@@ -144,12 +148,11 @@ fn test_input_element() {
     pub fn size(&self) -> u32
     pub fn set_size(&self, size: u32)
     */
-    /*TODO fails in chrome
-        element.set_type("image");
-        assert_eq!(element.src(), "", "Should have no src");
-        element.set_value("hey.png");
-        assert_eq!(element.src(), "hey.png", "Should have a src");
-    */
+    element.set_type("image");
+    assert_eq!(element.src(), "", "Should have no src");
+    const EMPTY_IMAGE: &str = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E";
+    element.set_src(EMPTY_IMAGE);
+    assert_eq!(element.src(), EMPTY_IMAGE, "Should have a src");
     /*TODO add tests
     pub fn src(&self) -> String
     pub fn set_src(&self, src: &str)
@@ -160,11 +163,9 @@ fn test_input_element() {
     pub fn default_value(&self) -> String
     pub fn set_default_value(&self, default_value: &str)
     */
-    /*TODO fails in chrome
-        assert_eq!(element.value(), "", "Should have no value");
-        element.set_value("hey!");
-        assert_eq!(element.value(), "hey!", "Should have a value");
-    */
+    assert_eq!(element.value(), "", "Should have no value");
+    element.set_value("hey!");
+    assert_eq!(element.value(), "hey!", "Should have a value");
     element.set_type("number");
     element.set_value("1");
     assert_eq!(element.value_as_number(), 1.0, "Should have value 1");
@@ -173,19 +174,24 @@ fn test_input_element() {
 
     assert_eq!(element.width(), 0, "Should have no width");
     element.set_width(12);
-    assert_eq!(element.width(), 0, "Should have no width"); // Doesn't change, TODO check with get_attribute("width")=="12"
+    assert_eq!(element.width(), 0, "Should have no width");
+    assert_eq!(
+        element.get_attribute("width").unwrap(),
+        "12",
+        "The width attribute should be 12"
+    );
 
-    assert_eq!(element.will_validate(), false, "Shouldn't validate");
+    assert!(!element.will_validate(), "Shouldn't validate");
     assert_eq!(
         element.validation_message().unwrap(),
         "",
         "Shouldn't have a value"
     );
-    assert_eq!(element.check_validity(), true, "Should be valid");
-    assert_eq!(element.report_validity(), true, "Should be valid");
+    assert!(element.check_validity(), "Should be valid");
+    assert!(element.report_validity(), "Should be valid");
     element.set_custom_validity("Boop"); // Method exists but doesn't impact validity ?!??! TODO look into
-    assert_eq!(element.check_validity(), true, "Should be valid");
-    assert_eq!(element.report_validity(), true, "Should be valid");
+    assert!(element.check_validity(), "Should be valid");
+    assert!(element.report_validity(), "Should be valid");
     /*TODO add tests
     pub fn labels(&self) -> Option<NodeList>
     pub fn select(&self)

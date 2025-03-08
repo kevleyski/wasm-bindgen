@@ -2,7 +2,7 @@
 //! module.
 //!
 //! This crate is in charge of enabling code using `wasm-bindgen` to use the
-//! `externref` type inside of the wasm module. This transformation pass primarily
+//! `externref` type inside of the Wasm module. This transformation pass primarily
 //! wraps exports and imports in shims which use `externref`, but quickly turn them
 //! into `i32` value types. This is all largely a stopgap until Rust has
 //! first-class support for the `externref` type, but that's thought to be in the
@@ -11,20 +11,21 @@
 //!
 //! The pass here works by collecting information during binding generation
 //! about imports and exports. Afterwards this pass runs in one go against a
-//! wasm module, updating exports, imports, calls to these functions, etc. The
-//! goal at least is to have valid wasm modules coming in that don't use
-//! `externref` and valid wasm modules going out which use `externref` at the fringes.
+//! Wasm module, updating exports, imports, calls to these functions, etc. The
+//! goal at least is to have valid Wasm modules coming in that don't use
+//! `externref` and valid Wasm modules going out which use `externref` at the fringes.
 
-use anyhow::{anyhow, bail, Error};
+use anyhow::{anyhow, bail, Context as _, Error};
 use std::cmp;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem;
-use walrus::ir::*;
+
+use walrus::{ir::*, ElementItems, RefType};
+use walrus::{ConstExpr, FunctionId, GlobalId, Module, TableId, ValType};
 use walrus::{ElementId, ExportId, ImportId, InstrLocId, TypeId};
-use walrus::{FunctionId, GlobalId, InitExpr, Module, TableId, ValType};
 
 // must be kept in sync with src/lib.rs and EXTERNREF_HEAP_START
-const DEFAULT_MIN: u32 = 128;
+const DEFAULT_MIN: u64 = 128;
 
 /// State of the externref pass, used to collect information while bindings are
 /// generated and used eventually to actually execute the entire pass.
@@ -51,6 +52,9 @@ pub struct Context {
 
     // The externref table we'll be using, injected after construction
     table: Option<TableId>,
+
+    // If the bulk memory proposal is enabled.
+    bulk_memory: bool,
 }
 
 pub struct Meta {
@@ -96,10 +100,19 @@ enum Intrinsic {
 }
 
 impl Context {
-    /// Executed first very early over a wasm module, used to learn about how
+    /// Executed first very early over a Wasm module, used to learn about how
     /// large the function table is so we know what indexes to hand out when
     /// we're appending entries.
     pub fn prepare(&mut self, module: &mut Module) -> Result<(), Error> {
+        // Insert reference types to the target features section.
+        wasm_bindgen_wasm_conventions::insert_target_feature(module, "reference-types")
+            .context("failed to parse `target_features` custom section")?;
+
+        self.bulk_memory = matches!(
+            wasm_bindgen_wasm_conventions::target_feature(module, "bulk-memory"),
+            Ok(true)
+        );
+
         // Figure out what the maximum index of functions pointers are. We'll
         // be adding new entries to the function table later (maybe) so
         // precalculate this ahead of time.
@@ -112,10 +125,14 @@ impl Context {
                     _ => continue,
                 };
                 let offset = match offset {
-                    walrus::InitExpr::Value(Value::I32(n)) => *n as u32,
+                    walrus::ConstExpr::Value(Value::I32(n)) => *n as u32,
                     other => bail!("invalid offset for segment of function table {:?}", other),
                 };
-                let max = offset + elem.members.len() as u32;
+                let len = match &elem.items {
+                    ElementItems::Functions(items) => items.len(),
+                    ElementItems::Expressions(_, items) => items.len(),
+                };
+                let max = offset + len as u32;
                 self.new_element_offset = cmp::max(self.new_element_offset, max);
                 self.elements.insert(offset, *id);
             }
@@ -126,7 +143,7 @@ impl Context {
         self.table = Some(
             module
                 .tables
-                .add_local(DEFAULT_MIN, None, ValType::Externref),
+                .add_local(false, DEFAULT_MIN, None, RefType::Externref),
         );
 
         Ok(())
@@ -176,7 +193,7 @@ impl Context {
     }
 
     fn function(&self, externref: &[(usize, bool)], ret_externref: bool) -> Option<Function> {
-        if !ret_externref && externref.len() == 0 {
+        if !ret_externref && externref.is_empty() {
             return None;
         }
         Some(Function {
@@ -190,8 +207,8 @@ impl Context {
 
         // Inject a stack pointer global which will be used for managing the
         // stack on the externref table.
-        let init = InitExpr::Value(Value::I32(DEFAULT_MIN as i32));
-        let stack_pointer = module.globals.add_local(ValType::I32, true, init);
+        let init = ConstExpr::Value(Value::I32(DEFAULT_MIN as i32));
+        let stack_pointer = module.globals.add_local(ValType::I32, true, false, init);
 
         let mut heap_alloc = None;
         let mut heap_dealloc = None;
@@ -284,12 +301,6 @@ impl Transform<'_> {
         assert!(self.cx.exports.is_empty());
         self.process_elements(module)?;
         assert!(self.cx.new_elements.is_empty());
-
-        // If we didn't actually transform anything, no need to inject or
-        // rewrite anything from below.
-        if self.shims.is_empty() {
-            return Ok(());
-        }
 
         // Perform all instruction transformations to rewrite calls between
         // functions and make sure everything is still hooked up right.
@@ -418,16 +429,25 @@ impl Transform<'_> {
         // Create shims for all our functions and append them all to the segment
         // which places elements at the end.
         let mut new_segment = Vec::new();
-        for (idx, function) in mem::replace(&mut self.cx.new_elements, Vec::new()) {
+        for (idx, function) in mem::take(&mut self.cx.new_elements) {
             let (&offset, &orig_element) = self
                 .cx
                 .elements
                 .range(..=idx)
                 .next_back()
                 .ok_or(anyhow!("failed to find segment defining index {}", idx))?;
-            let target = module.elements.get(orig_element).members[(idx - offset) as usize].ok_or(
-                anyhow!("function index {} not present in element segment", idx),
-            )?;
+
+            let target = match &module.elements.get(orig_element).items {
+                ElementItems::Functions(items) => items[(idx - offset) as usize],
+                ElementItems::Expressions(_, items) => {
+                    if let ConstExpr::RefFunc(target) = items[(idx - offset) as usize] {
+                        target
+                    } else {
+                        bail!("function index {} not present in element segment", idx)
+                    }
+                }
+            };
+
             let (shim, _externref_ty) = self.append_shim(
                 target,
                 &format!("closure{}", idx),
@@ -436,20 +456,23 @@ impl Transform<'_> {
                 &mut module.funcs,
                 &mut module.locals,
             )?;
-            new_segment.push(Some(shim));
+            new_segment.push(ConstExpr::RefFunc(shim));
         }
 
         // ... and next update the limits of the table in case any are listed.
         let new_max = self.cx.new_element_offset + new_segment.len() as u32;
-        table.initial = cmp::max(table.initial, new_max);
+        table.initial = cmp::max(table.initial, u64::from(new_max));
         if let Some(max) = table.maximum {
-            table.maximum = Some(cmp::max(max, new_max));
+            table.maximum = Some(cmp::max(max, u64::from(new_max)));
         }
         let kind = walrus::ElementKind::Active {
             table: table.id(),
-            offset: InitExpr::Value(Value::I32(self.cx.new_element_offset as i32)),
+            offset: ConstExpr::Value(Value::I32(self.cx.new_element_offset as i32)),
         };
-        let segment = module.elements.add(kind, ValType::Funcref, new_segment);
+        let segment = module.elements.add(
+            kind,
+            ElementItems::Expressions(RefType::Funcref, new_segment),
+        );
         table.elem_segments.insert(segment);
 
         Ok(())
@@ -490,9 +513,9 @@ impl Transform<'_> {
         for (i, old_ty) in target_ty.params().iter().enumerate() {
             let is_owned = func.args.remove(&i);
             let new_ty = is_owned
-                .map(|_which| ValType::Externref)
-                .unwrap_or(old_ty.clone());
-            param_tys.push(new_ty.clone());
+                .map(|_which| ValType::Ref(RefType::Externref))
+                .unwrap_or(*old_ty);
+            param_tys.push(new_ty);
             if new_ty == *old_ty {
                 param_convert.push(Convert::None);
             } else if is_export {
@@ -515,7 +538,7 @@ impl Transform<'_> {
 
         let new_ret = if func.ret_externref {
             assert_eq!(target_ty.results(), &[ValType::I32]);
-            vec![ValType::Externref]
+            vec![ValType::Ref(RefType::Externref)]
         } else {
             target_ty.results().to_vec()
         };
@@ -555,7 +578,7 @@ impl Transform<'_> {
         // gc passes if we don't actually end up using them.
         let fp = locals.add(ValType::I32);
         let scratch_i32 = locals.add(ValType::I32);
-        let scratch_externref = locals.add(ValType::Externref);
+        let scratch_externref = locals.add(ValType::Ref(RefType::Externref));
 
         // Update our stack pointer if there's any borrowed externref objects.
         if externref_stack > 0 {
@@ -648,17 +671,22 @@ impl Transform<'_> {
         //
         // Note that we pave over all our stack slots with `ref.null` to ensure
         // that the table doesn't accidentally hold a strong reference to items
-        // no longer in use by our wasm instance.
-        //
-        // TODO: use `table.fill` once that's spec'd
+        // no longer in use by our Wasm instance.
         if externref_stack > 0 {
-            for i in 0..externref_stack {
-                body.local_get(fp);
-                if i > 0 {
-                    body.i32_const(i).binop(BinaryOp::I32Add);
+            if self.cx.bulk_memory {
+                body.local_get(fp)
+                    .ref_null(RefType::Externref)
+                    .i32_const(externref_stack)
+                    .table_fill(self.table);
+            } else {
+                for i in 0..externref_stack {
+                    body.local_get(fp);
+                    if i > 0 {
+                        body.i32_const(i).binop(BinaryOp::I32Add);
+                    }
+                    body.ref_null(RefType::Externref);
+                    body.table_set(self.table);
                 }
-                body.ref_null(ValType::Externref);
-                body.table_set(self.table);
             }
 
             body.local_get(fp)
@@ -708,24 +736,25 @@ impl Transform<'_> {
         impl VisitorMut for Rewrite<'_, '_> {
             fn start_instr_seq_mut(&mut self, seq: &mut InstrSeq) {
                 for i in (0..seq.instrs.len()).rev() {
-                    let call = match &mut seq.instrs[i].0 {
-                        Instr::Call(call) => call,
+                    let func = match &mut seq.instrs[i].0 {
+                        Instr::Call(Call { func }) => func,
+                        Instr::ReturnCall(ReturnCall { func }) => func,
                         _ => continue,
                     };
-                    let intrinsic = match self.xform.intrinsic_map.get(&call.func) {
+                    let intrinsic = match self.xform.intrinsic_map.get(func) {
                         Some(f) => f,
                         None => {
                             // If this wasn't a call of an intrinsic, but it was a
                             // call of one of our old import functions then we
                             // switch the functions we're calling here.
-                            if let Some(f) = self.xform.import_map.get(&call.func) {
-                                call.func = *f;
+                            if let Some(f) = self.xform.import_map.get(func) {
+                                *func = *f;
                             }
                             continue;
                         }
                     };
 
-                    let ty = ValType::Externref;
+                    let ty = RefType::Externref;
                     match intrinsic {
                         Intrinsic::TableGrow => {
                             // Change something that looks like:
@@ -762,8 +791,8 @@ impl Transform<'_> {
                             seq.instrs
                                 .insert(i, (RefNull { ty }.into(), InstrLocId::default()));
                         }
-                        Intrinsic::DropRef => call.func = self.heap_dealloc,
-                        Intrinsic::CloneRef => call.func = self.clone_ref,
+                        Intrinsic::DropRef => *func = self.heap_dealloc,
+                        Intrinsic::CloneRef => *func = self.clone_ref,
                     }
                 }
             }

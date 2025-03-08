@@ -1,6 +1,6 @@
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_test::*;
-use web_sys::{HtmlButtonElement, HtmlFormElement, Node};
+use web_sys::{HtmlButtonElement, HtmlFormElement};
 
 #[wasm_bindgen(module = "/tests/wasm/element.js")]
 extern "C" {
@@ -9,6 +9,7 @@ extern "C" {
 }
 
 #[wasm_bindgen_test]
+#[allow(deprecated)]
 fn test_button_element() {
     let element = new_button();
     let location = web_sys::window().unwrap().location().href().unwrap();
@@ -21,8 +22,9 @@ fn test_button_element() {
     assert!(element.disabled(), "Should be disabled");
 
     match element.form() {
-        None => assert!(true, "Shouldn't have a form"),
-        _ => assert!(false, "Shouldn't have a form"),
+        // Shouldn't have a form
+        None => (),
+        _ => unreachable!("Shouldn't have a form"),
     };
 
     assert_eq!(
@@ -73,17 +75,17 @@ fn test_button_element() {
     element.set_value("value1");
     assert_eq!(element.value(), "value1", "Should have a value");
 
-    assert_eq!(element.will_validate(), false, "Shouldn't validate");
+    assert!(!element.will_validate(), "Shouldn't validate");
     assert_eq!(
         element.validation_message().unwrap(),
         "",
         "Shouldn't have a value"
     );
-    assert_eq!(element.check_validity(), true, "Should be valid");
-    assert_eq!(element.report_validity(), true, "Should be valid");
+    assert!(element.check_validity(), "Should be valid");
+    assert!(element.report_validity(), "Should be valid");
     element.set_custom_validity("Boop"); // Method exists but doesn't impact validity
-    assert_eq!(element.check_validity(), true, "Should be valid");
-    assert_eq!(element.report_validity(), true, "Should be valid");
+    assert!(element.check_validity(), "Should be valid");
+    assert!(element.report_validity(), "Should be valid");
 
     assert_eq!(
         element.labels().length(),
@@ -99,18 +101,13 @@ fn test_button_element_in_form() {
     let form = new_form();
     form.set_name("test-form");
 
-    // TODO: implement `Clone` for types in `web_sys` to make this easier.
-    let button = JsValue::from(button);
-    let as_node = Node::from(button.clone());
-    Node::from(JsValue::from(form))
-        .append_child(&as_node)
-        .unwrap();
+    form.append_child(&button).unwrap();
 
-    let element = HtmlButtonElement::from(button);
-    match element.form() {
-        None => assert!(false, "Should have a form"),
+    match button.form() {
+        // Should have a form
+        None => (),
         Some(form) => {
-            assert!(true, "Should have a form");
+            // Should have a form
             assert_eq!(
                 form.name(),
                 "test-form",
@@ -118,5 +115,5 @@ fn test_button_element_in_form() {
             );
         }
     };
-    assert_eq!(element.type_(), "reset", "Should have a type");
+    assert_eq!(button.type_(), "reset", "Should have a type");
 }

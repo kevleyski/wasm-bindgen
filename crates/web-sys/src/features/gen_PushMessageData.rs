@@ -1,4 +1,5 @@
 #![allow(unused_imports)]
+#![allow(clippy::all)]
 use super::*;
 use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
@@ -39,5 +40,5 @@ extern "C" {
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/PushMessageData/text)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `PushMessageData`*"]
-    pub fn text(this: &PushMessageData) -> String;
+    pub fn text(this: &PushMessageData) -> ::alloc::string::String;
 }

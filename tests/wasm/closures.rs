@@ -432,7 +432,9 @@ fn drop_drops() {
         }
     }
     let a = A;
-    let x: Closure<dyn Fn()> = Closure::new(move || drop(&a));
+    let x: Closure<dyn Fn()> = Closure::new(move || {
+        let _ = &a;
+    });
     drop(x);
     unsafe {
         assert!(HIT);
@@ -471,7 +473,7 @@ fn drop_during_call_ok() {
         assert_eq!(x, 3);
 
         // make sure `A` is bound to our closure environment.
-        drop(&a);
+        let _a = &a;
         unsafe {
             assert!(!HIT);
         }
@@ -497,7 +499,9 @@ fn test_closure_returner() {
     js_test_closure_returner();
 
     #[wasm_bindgen]
-    pub struct ClosureHandle(Closure<ClosureType>);
+    pub struct ClosureHandle {
+        _closure: Closure<ClosureType>,
+    }
 
     #[wasm_bindgen]
     pub struct BadStruct {}
@@ -510,13 +514,13 @@ fn test_closure_returner() {
         Reflect::set(
             &o,
             &JsValue::from("someKey"),
-            &some_fn.as_ref().unchecked_ref(),
+            some_fn.as_ref().unchecked_ref(),
         )
         .unwrap();
         Reflect::set(
             &o,
             &JsValue::from("handle"),
-            &JsValue::from(ClosureHandle(some_fn)),
+            &JsValue::from(ClosureHandle { _closure: some_fn }),
         )
         .unwrap();
 
@@ -605,25 +609,33 @@ fn call_destroyed_doesnt_segfault() {
     }
 
     let a = A(1, 1);
-    let a = Closure::wrap(Box::new(move || drop(&a)) as Box<dyn Fn()>);
+    let a = Closure::wrap(Box::new(move || {
+        let _ = a;
+    }) as Box<dyn Fn()>);
     let b = a.as_ref().clone();
     drop(a);
     call_destroyed(&b);
 
     let a = A(2, 2);
-    let a = Closure::wrap(Box::new(move || drop(&a)) as Box<dyn FnMut()>);
+    let a = Closure::wrap(Box::new(move || {
+        let _ = a;
+    }) as Box<dyn FnMut()>);
     let b = a.as_ref().clone();
     drop(a);
     call_destroyed(&b);
 
     let a = A(1, 1);
-    let a = Closure::wrap(Box::new(move |_: &JsValue| drop(&a)) as Box<dyn Fn(&JsValue)>);
+    let a = Closure::wrap(Box::new(move |_: &JsValue| {
+        let _ = a;
+    }) as Box<dyn Fn(&JsValue)>);
     let b = a.as_ref().clone();
     drop(a);
     call_destroyed(&b);
 
     let a = A(2, 2);
-    let a = Closure::wrap(Box::new(move |_: &JsValue| drop(&a)) as Box<dyn FnMut(&JsValue)>);
+    let a = Closure::wrap(Box::new(move |_: &JsValue| {
+        let _ = a;
+    }) as Box<dyn FnMut(&JsValue)>);
     let b = a.as_ref().clone();
     drop(a);
     call_destroyed(&b);

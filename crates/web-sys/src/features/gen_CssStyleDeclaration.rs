@@ -1,4 +1,5 @@
 #![allow(unused_imports)]
+#![allow(clippy::all)]
 use super::*;
 use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
@@ -17,7 +18,7 @@ extern "C" {
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/CSSStyleDeclaration/cssText)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `CssStyleDeclaration`*"]
-    pub fn css_text(this: &CssStyleDeclaration) -> String;
+    pub fn css_text(this: &CssStyleDeclaration) -> ::alloc::string::String;
     # [wasm_bindgen (structural , method , setter , js_class = "CSSStyleDeclaration" , js_name = cssText)]
     #[doc = "Setter for the `cssText` field of this object."]
     #[doc = ""]
@@ -46,7 +47,10 @@ extern "C" {
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/CSSStyleDeclaration/getPropertyPriority)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `CssStyleDeclaration`*"]
-    pub fn get_property_priority(this: &CssStyleDeclaration, property: &str) -> String;
+    pub fn get_property_priority(
+        this: &CssStyleDeclaration,
+        property: &str,
+    ) -> ::alloc::string::String;
     # [wasm_bindgen (catch , method , structural , js_class = "CSSStyleDeclaration" , js_name = getPropertyValue)]
     #[doc = "The `getPropertyValue()` method."]
     #[doc = ""]
@@ -56,21 +60,24 @@ extern "C" {
     pub fn get_property_value(
         this: &CssStyleDeclaration,
         property: &str,
-    ) -> Result<String, JsValue>;
+    ) -> Result<::alloc::string::String, JsValue>;
     # [wasm_bindgen (method , structural , js_class = "CSSStyleDeclaration" , js_name = item)]
     #[doc = "The `item()` method."]
     #[doc = ""]
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/CSSStyleDeclaration/item)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `CssStyleDeclaration`*"]
-    pub fn item(this: &CssStyleDeclaration, index: u32) -> String;
+    pub fn item(this: &CssStyleDeclaration, index: u32) -> ::alloc::string::String;
     # [wasm_bindgen (catch , method , structural , js_class = "CSSStyleDeclaration" , js_name = removeProperty)]
     #[doc = "The `removeProperty()` method."]
     #[doc = ""]
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/CSSStyleDeclaration/removeProperty)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `CssStyleDeclaration`*"]
-    pub fn remove_property(this: &CssStyleDeclaration, property: &str) -> Result<String, JsValue>;
+    pub fn remove_property(
+        this: &CssStyleDeclaration,
+        property: &str,
+    ) -> Result<::alloc::string::String, JsValue>;
     # [wasm_bindgen (catch , method , structural , js_class = "CSSStyleDeclaration" , js_name = setProperty)]
     #[doc = "The `setProperty()` method."]
     #[doc = ""]
@@ -95,10 +102,10 @@ extern "C" {
         priority: &str,
     ) -> Result<(), JsValue>;
     #[wasm_bindgen(method, structural, js_class = "CSSStyleDeclaration", indexing_getter)]
-    #[doc = "Indexing getter."]
+    #[doc = "Indexing getter. As in the literal Javascript `this[key]`."]
     #[doc = ""]
     #[doc = ""]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `CssStyleDeclaration`*"]
-    pub fn get(this: &CssStyleDeclaration, index: u32) -> Option<String>;
+    pub fn get(this: &CssStyleDeclaration, index: u32) -> Option<::alloc::string::String>;
 }

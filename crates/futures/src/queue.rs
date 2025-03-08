@@ -1,8 +1,19 @@
+use alloc::collections::VecDeque;
+use alloc::rc::Rc;
+use core::cell::{Cell, RefCell};
 use js_sys::Promise;
-use std::cell::{Cell, RefCell};
-use std::collections::VecDeque;
-use std::rc::Rc;
 use wasm_bindgen::prelude::*;
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen]
+    fn queueMicrotask(closure: &Closure<dyn FnMut(JsValue)>);
+
+    type Global;
+
+    #[wasm_bindgen(method, getter, js_name = queueMicrotask)]
+    fn hasQueueMicrotask(this: &Global) -> JsValue;
+}
 
 struct QueueState {
     // The queue of Tasks which are to be run in order. In practice this is all the
@@ -42,20 +53,25 @@ pub(crate) struct Queue {
     state: Rc<QueueState>,
     promise: Promise,
     closure: Closure<dyn FnMut(JsValue)>,
+    has_queue_microtask: bool,
 }
 
 impl Queue {
     // Schedule a task to run on the next tick
     pub(crate) fn schedule_task(&self, task: Rc<crate::task::Task>) {
         self.state.tasks.borrow_mut().push_back(task);
-        // Note that we currently use a promise and a closure to do this, but
-        // eventually we should probably use something like `queueMicrotask`:
-        // https://developer.mozilla.org/en-US/docs/Web/API/WindowOrWorkerGlobalScope/queueMicrotask
+        // Use queueMicrotask to execute as soon as possible. If it does not exist
+        // fall back to the promise resolution
         if !self.state.is_scheduled.replace(true) {
-            let _ = self.promise.then(&self.closure);
+            if self.has_queue_microtask {
+                queueMicrotask(&self.closure);
+            } else {
+                let _ = self.promise.then(&self.closure);
+            }
         }
     }
     // Append a task to the currently running queue, or schedule it
+    #[cfg(not(target_feature = "atomics"))]
     pub(crate) fn push_task(&self, task: Rc<crate::task::Task>) {
         // It would make sense to run this task on the same tick.  For now, we
         // make the simplifying choice of always scheduling tasks for a future tick.
@@ -70,6 +86,11 @@ impl Queue {
             tasks: RefCell::new(VecDeque::new()),
         });
 
+        let has_queue_microtask = js_sys::global()
+            .unchecked_into::<Global>()
+            .hasQueueMicrotask()
+            .is_function();
+
         Self {
             promise: Promise::resolve(&JsValue::undefined()),
 
@@ -82,10 +103,24 @@ impl Queue {
             },
 
             state,
+            has_queue_microtask,
         }
     }
-}
 
-thread_local! {
-    pub(crate) static QUEUE: Queue = Queue::new();
+    pub(crate) fn with<R>(f: impl FnOnce(&Self) -> R) -> R {
+        use once_cell::unsync::Lazy;
+
+        struct Wrapper<T>(Lazy<T>);
+
+        #[cfg(not(target_feature = "atomics"))]
+        unsafe impl<T> Sync for Wrapper<T> {}
+
+        #[cfg(not(target_feature = "atomics"))]
+        unsafe impl<T> Send for Wrapper<T> {}
+
+        #[cfg_attr(target_feature = "atomics", thread_local)]
+        static QUEUE: Wrapper<Queue> = Wrapper(Lazy::new(Queue::new));
+
+        f(&QUEUE.0)
+    }
 }

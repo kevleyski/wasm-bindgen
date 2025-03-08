@@ -35,16 +35,11 @@ pub struct Bindgen {
     remove_producers_section: bool,
     omit_default_module_path: bool,
     emit_start: bool,
-    // Experimental support for weakrefs, an upcoming ECMAScript feature.
-    // Currently only enable-able through an env var.
-    weak_refs: bool,
-    // Support for the wasm threads proposal, transforms the wasm module to be
-    // "ready to be instantiated on any thread"
-    threads: wasm_bindgen_threads_xform::Config,
     externref: bool,
     multi_value: bool,
     encode_into: EncodeInto,
     split_linked_modules: bool,
+    symbol_dispose: bool,
 }
 
 pub struct Output {
@@ -69,7 +64,7 @@ enum OutputMode {
     Bundler { browser_only: bool },
     Web,
     NoModules { global: String },
-    Node { experimental_modules: bool },
+    Node { module: bool },
     Deno,
 }
 
@@ -91,6 +86,7 @@ impl Bindgen {
         let externref =
             env::var("WASM_BINDGEN_ANYREF").is_ok() || env::var("WASM_BINDGEN_EXTERNREF").is_ok();
         let multi_value = env::var("WASM_BINDGEN_MULTI_VALUE").is_ok();
+        let symbol_dispose = env::var("WASM_BINDGEN_EXPERIMENTAL_SYMBOL_DISPOSE").is_ok();
         Bindgen {
             input: Input::None,
             out_name: None,
@@ -106,13 +102,12 @@ impl Bindgen {
             remove_name_section: false,
             remove_producers_section: false,
             emit_start: true,
-            weak_refs: env::var("WASM_BINDGEN_WEAKREF").is_ok(),
-            threads: threads_config(),
             externref,
             multi_value,
             encode_into: EncodeInto::Test,
             omit_default_module_path: true,
             split_linked_modules: false,
+            symbol_dispose,
         }
     }
 
@@ -126,11 +121,7 @@ impl Bindgen {
         self
     }
 
-    pub fn weak_refs(&mut self, enable: bool) -> &mut Bindgen {
-        self.weak_refs = enable;
-        self
-    }
-
+    #[deprecated = "automatically detected via `-Ctarget-feature=+reference-types`"]
     pub fn reference_types(&mut self, enable: bool) -> &mut Bindgen {
         self.externref = enable;
         self
@@ -140,14 +131,14 @@ impl Bindgen {
     pub fn input_module(&mut self, name: &str, module: Module) -> &mut Bindgen {
         let name = name.to_string();
         self.input = Input::Module(module, name);
-        return self;
+        self
     }
 
     /// Specify the input as the provided Wasm bytes.
     pub fn input_bytes(&mut self, name: &str, bytes: Vec<u8>) -> &mut Bindgen {
         let name = name.to_string();
         self.input = Input::Bytes(bytes, name);
-        return self;
+        self
     }
 
     fn switch_mode(&mut self, mode: OutputMode, flag: &str) -> Result<(), Error> {
@@ -163,23 +154,16 @@ impl Bindgen {
 
     pub fn nodejs(&mut self, node: bool) -> Result<&mut Bindgen, Error> {
         if node {
-            self.switch_mode(
-                OutputMode::Node {
-                    experimental_modules: false,
-                },
-                "--target nodejs",
-            )?;
+            self.switch_mode(OutputMode::Node { module: false }, "--target nodejs")?;
         }
         Ok(self)
     }
 
-    pub fn nodejs_experimental_modules(&mut self, node: bool) -> Result<&mut Bindgen, Error> {
+    pub fn nodejs_module(&mut self, node: bool) -> Result<&mut Bindgen, Error> {
         if node {
             self.switch_mode(
-                OutputMode::Node {
-                    experimental_modules: true,
-                },
-                "--nodejs-experimental-modules",
+                OutputMode::Node { module: true },
+                "--target experimental-nodejs-module",
             )?;
         }
         Ok(self)
@@ -332,13 +316,29 @@ impl Bindgen {
                 })?
             }
             Input::Bytes(ref bytes, _) => self
-                .module_from_bytes(&bytes)
+                .module_from_bytes(bytes)
                 .context("failed getting Wasm module")?,
         };
 
-        let thread_count = self
-            .threads
-            .run(&mut module)
+        // Enable reference type transformations if the module is already using it.
+        if let Ok(true) = wasm_bindgen_wasm_conventions::target_feature(&module, "reference-types")
+        {
+            self.externref = true;
+        }
+
+        // Enable multivalue transformations if the module is already using it.
+        if let Ok(true) = wasm_bindgen_wasm_conventions::target_feature(&module, "multivalue") {
+            self.multi_value = true;
+        }
+
+        // Check that no exported symbol is called "default" if we target web.
+        if matches!(self.mode, OutputMode::Web)
+            && module.exports.iter().any(|export| export.name == "default")
+        {
+            bail!("exported symbol \"default\" not allowed for --target web")
+        }
+
+        let thread_count = wasm_bindgen_threads_xform::run(&mut module)
             .with_context(|| "failed to prepare module for threading")?;
 
         // If requested, turn all mangled symbols into prettier unmangled
@@ -373,17 +373,11 @@ impl Bindgen {
         descriptors::execute(&mut module)?;
 
         // Process the custom section we extracted earlier. In its stead insert
-        // a forward-compatible wasm interface types section as well as an
+        // a forward-compatible Wasm interface types section as well as an
         // auxiliary section for all sorts of miscellaneous information and
         // features #[wasm_bindgen] supports that aren't covered by wasm
         // interface types.
-        wit::process(
-            &mut module,
-            programs,
-            self.externref,
-            thread_count,
-            self.emit_start,
-        )?;
+        wit::process(self, &mut module, programs, thread_count)?;
 
         // Now that we've got type information from the webidl processing pass,
         // touch up the output of rustc to insert externref shims where necessary.
@@ -420,7 +414,7 @@ impl Bindgen {
                 .context("failed to transform return pointers into multi-value Wasm")?;
         }
 
-        // We've done a whole bunch of transformations to the wasm module, many
+        // We've done a whole bunch of transformations to the Wasm module, many
         // of which leave "garbage" lying around, so let's prune out all our
         // unnecessary things here.
         gc_module_and_adapters(&mut module);
@@ -469,7 +463,7 @@ impl Bindgen {
             .generate_dwarf(self.keep_debug)
             .generate_name_section(!self.remove_name_section)
             .generate_producers_section(!self.remove_producers_section)
-            .parse(&bytes)
+            .parse(bytes)
             .context("failed to parse input as wasm")
     }
 
@@ -493,11 +487,28 @@ fn reset_indentation(s: &str) -> String {
     let mut indent: u32 = 0;
     let mut dst = String::new();
 
+    fn is_doc_comment(line: &str) -> bool {
+        line.starts_with("*")
+    }
+
     for line in s.lines() {
         let line = line.trim();
-        if line.starts_with('}') || (line.ends_with('}') && !line.starts_with('*')) {
+
+        // handle doc comments separately
+        if is_doc_comment(line) {
+            for _ in 0..indent {
+                dst.push_str("    ");
+            }
+            dst.push(' ');
+            dst.push_str(line);
+            dst.push('\n');
+            continue;
+        }
+
+        if line.starts_with('}') {
             indent = indent.saturating_sub(1);
         }
+
         let extra = if line.starts_with(':') || line.starts_with('?') {
             1
         } else {
@@ -509,27 +520,13 @@ fn reset_indentation(s: &str) -> String {
             }
             dst.push_str(line);
         }
-        dst.push_str("\n");
-        // Ignore { inside of comments and if it's an exported enum
-        if line.ends_with('{') && !line.starts_with('*') && !line.ends_with("Object.freeze({") {
+        dst.push('\n');
+
+        if line.ends_with('{') {
             indent += 1;
         }
     }
-    return dst;
-}
-
-// Eventually these will all be CLI options, but while they're unstable features
-// they're left as environment variables. We don't guarantee anything about
-// backwards-compatibility with these options.
-fn threads_config() -> wasm_bindgen_threads_xform::Config {
-    let mut cfg = wasm_bindgen_threads_xform::Config::new();
-    if let Ok(s) = env::var("WASM_BINDGEN_THREADS_MAX_MEMORY") {
-        cfg.maximum_memory(s.parse().unwrap());
-    }
-    if let Ok(s) = env::var("WASM_BINDGEN_THREADS_STACK_SIZE") {
-        cfg.thread_stack_size(s.parse().unwrap());
-    }
-    cfg
+    dst
 }
 
 fn demangle(module: &mut Module) {
@@ -546,55 +543,28 @@ fn demangle(module: &mut Module) {
 
 impl OutputMode {
     fn uses_es_modules(&self) -> bool {
-        match self {
+        matches!(
+            self,
             OutputMode::Bundler { .. }
-            | OutputMode::Web
-            | OutputMode::Node {
-                experimental_modules: true,
-            }
-            | OutputMode::Deno => true,
-            _ => false,
-        }
-    }
-
-    fn nodejs_experimental_modules(&self) -> bool {
-        match self {
-            OutputMode::Node {
-                experimental_modules,
-            } => *experimental_modules,
-            _ => false,
-        }
+                | OutputMode::Web
+                | OutputMode::Node { module: true }
+                | OutputMode::Deno
+        )
     }
 
     fn nodejs(&self) -> bool {
-        match self {
-            OutputMode::Node { .. } => true,
-            _ => false,
-        }
+        matches!(self, OutputMode::Node { .. })
     }
 
     fn no_modules(&self) -> bool {
-        match self {
-            OutputMode::NoModules { .. } => true,
-            _ => false,
-        }
-    }
-
-    fn web(&self) -> bool {
-        match self {
-            OutputMode::Web => true,
-            _ => false,
-        }
+        matches!(self, OutputMode::NoModules { .. })
     }
 
     fn esm_integration(&self) -> bool {
-        match self {
-            OutputMode::Bundler { .. }
-            | OutputMode::Node {
-                experimental_modules: true,
-            } => true,
-            _ => false,
-        }
+        matches!(
+            self,
+            OutputMode::Bundler { .. } | OutputMode::Node { module: true }
+        )
     }
 }
 
@@ -686,23 +656,29 @@ impl Output {
                 .with_context(|| format!("failed to write `{}`", path.display()))?;
         }
 
-        if gen.npm_dependencies.len() > 0 {
-            let map = gen
-                .npm_dependencies
-                .iter()
-                .map(|(k, v)| (k, &v.1))
-                .collect::<BTreeMap<_, _>>();
-            let json = serde_json::to_string_pretty(&map)?;
+        let is_genmode_nodemodule = matches!(gen.mode, OutputMode::Node { module: true });
+        if !gen.npm_dependencies.is_empty() || is_genmode_nodemodule {
+            #[derive(serde::Serialize)]
+            struct PackageJson<'a> {
+                #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+                ty: Option<&'static str>,
+                dependencies: BTreeMap<&'a str, &'a str>,
+            }
+            let pj = PackageJson {
+                ty: is_genmode_nodemodule.then_some("module"),
+                dependencies: gen
+                    .npm_dependencies
+                    .iter()
+                    .map(|(k, v)| (k.as_str(), v.1.as_str()))
+                    .collect(),
+            };
+            let json = serde_json::to_string_pretty(&pj)?;
             fs::write(out_dir.join("package.json"), json)?;
         }
 
         // And now that we've got all our JS and TypeScript, actually write it
         // out to the filesystem.
-        let extension = if gen.mode.nodejs_experimental_modules() {
-            "mjs"
-        } else {
-            "js"
-        };
+        let extension = "js";
 
         fn write<P, C>(path: P, contents: C) -> Result<(), anyhow::Error>
         where
@@ -720,18 +696,27 @@ impl Output {
 
             let start = gen.start.as_deref().unwrap_or("");
 
-            write(
-                &js_path,
-                format!(
-                    "import * as wasm from \"./{wasm_name}.wasm\";
-import {{ __wbg_set_wasm }} from \"./{js_name}\";
-__wbg_set_wasm(wasm);
+            if matches!(gen.mode, OutputMode::Node { .. }) {
+                write(
+                    &js_path,
+                    format!(
+                        "\
+{start}
+export * from \"./{js_name}\";",
+                    ),
+                )?;
+            } else {
+                write(
+                    &js_path,
+                    format!(
+                        "\
+import * as wasm from \"./{wasm_name}.wasm\";
 export * from \"./{js_name}\";
 {start}"
-                ),
-            )?;
-
-            write(&out_dir.join(&js_name), reset_indentation(&gen.js))?;
+                    ),
+                )?;
+            }
+            write(out_dir.join(&js_name), reset_indentation(&gen.js))?;
         } else {
             write(&js_path, reset_indentation(&gen.js))?;
         }
@@ -755,8 +740,8 @@ export * from \"./{js_name}\";
 
 fn gc_module_and_adapters(module: &mut Module) {
     loop {
-        // Fist up, cleanup the native wasm module. Note that roots can come
-        // from custom sections, namely our wasm interface types custom section
+        // Fist up, cleanup the native Wasm module. Note that roots can come
+        // from custom sections, namely our Wasm interface types custom section
         // as well as the aux section.
         walrus::passes::gc::run(module);
 

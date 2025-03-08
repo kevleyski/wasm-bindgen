@@ -8,41 +8,35 @@ extern "C" {
 }
 
 #[wasm_bindgen_test]
+#[allow(deprecated)]
 fn test_select_element() {
     // Creates a select with four options.  Options are ["tomato", "potato", "orange", "apple"], where
     // the string is the .value and .text of each option.
     let select = new_select_with_food_opts();
     select.set_autofocus(true);
-    assert_eq!(
+    assert!(
         select.autofocus(),
-        true,
         "Select element should have a true autofocus property."
     );
 
     select.set_autofocus(false);
-    assert_eq!(
-        select.autofocus(),
-        false,
+    assert!(
+        !select.autofocus(),
         "Select element should have a false autofocus property."
     );
 
-    //    TODO: This test currently fails on Firefox, but not Chrome.  In Firefox, even though we select.set_autocomplete(), select.autocomplete() yields an empty String.
-    //    select.set_autocomplete("tomato");
-    //    assert_eq!(select.autocomplete(), "tomato", "Select element should have a 'tomato' autocomplete property.");
+    select.set_autocomplete("country");
+    assert_eq!(
+        select.autocomplete(),
+        "country",
+        "Select element should have a 'country' autocomplete property."
+    );
 
     select.set_disabled(true);
-    assert_eq!(
-        select.disabled(),
-        true,
-        "Select element should be disabled."
-    );
+    assert!(select.disabled(), "Select element should be disabled.");
 
     select.set_disabled(false);
-    assert_eq!(
-        select.disabled(),
-        false,
-        "Select element should not be disabled."
-    );
+    assert!(!select.disabled(), "Select element should not be disabled.");
 
     assert!(
         select.form().is_none(),
@@ -50,16 +44,14 @@ fn test_select_element() {
     );
 
     select.set_multiple(false);
-    assert_eq!(
-        select.multiple(),
-        false,
+    assert!(
+        !select.multiple(),
         "Select element should have a false multiple property."
     );
 
     select.set_multiple(true);
-    assert_eq!(
+    assert!(
         select.multiple(),
-        true,
         "Select element should have a true multiple property."
     );
 
@@ -71,18 +63,10 @@ fn test_select_element() {
     );
 
     select.set_required(true);
-    assert_eq!(
-        select.required(),
-        true,
-        "Select element should be required."
-    );
+    assert!(select.required(), "Select element should be required.");
 
     select.set_required(false);
-    assert_eq!(
-        select.required(),
-        false,
-        "Select element should not be required."
-    );
+    assert!(!select.required(), "Select element should not be required.");
 
     select.set_size(432);
     assert_eq!(
@@ -94,7 +78,7 @@ fn test_select_element() {
     // Default type seems to be "select-multiple" for the browsers I tested, but there's no guarantee
     // on this, so let's just make sure we get back something here.
     assert!(
-        select.type_().len() > 0,
+        !select.type_().is_empty(),
         "Select element should have some type."
     );
 
@@ -140,9 +124,8 @@ fn test_select_element() {
     );
 
     // This might be browser dependent, potentially rendering this test useless?  Worked fine in Chrome and Firefox for now.
-    assert_eq!(
+    assert!(
         select.will_validate(),
-        true,
         "Select element should not validate by default."
     );
 
@@ -173,9 +156,13 @@ fn test_select_element() {
         "There should be no labels associated with our select element."
     );
 
-    // TODO: This test won't work until this bug is fixed: https://www.w3.org/Bugs/Public/show_bug.cgi?id=20720.  Sometime in the future, either remove this test or uncomment after bug is fixed.
-    // assert!(select.named_item("tomato").is_some(), "Should be able to find the 'tomato' option before removing it.");
-    // select.remove(0);
-    // assert!(select.named_item("tomato").is_none(), "Shouldn't be able to find the 'tomato' option after removing it.")
-    // TODO: As a result, we are missing a test for the remove() method.
+    assert!(
+        select.named_item("tomato").is_some(),
+        "Should be able to find the 'tomato' option before removing it."
+    );
+    select.remove_with_index(0);
+    assert!(
+        select.named_item("tomato").is_none(),
+        "Shouldn't be able to find the 'tomato' option after removing it."
+    );
 }

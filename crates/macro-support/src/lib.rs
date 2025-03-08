@@ -12,9 +12,10 @@ extern crate wasm_bindgen_backend as backend;
 extern crate wasm_bindgen_shared as shared;
 
 pub use crate::parser::BindgenAttrs;
-use crate::parser::MacroParse;
+use crate::parser::{ConvertToAst, MacroParse};
 use backend::{Diagnostic, TryToTokens};
 use proc_macro2::TokenStream;
+use quote::quote;
 use quote::ToTokens;
 use quote::TokenStreamExt;
 use syn::parse::{Parse, ParseStream, Result as SynResult};
@@ -24,9 +25,25 @@ mod parser;
 /// Takes the parsed input from a `#[wasm_bindgen]` macro and returns the generated bindings
 pub fn expand(attr: TokenStream, input: TokenStream) -> Result<TokenStream, Diagnostic> {
     parser::reset_attrs_used();
+    // if struct is encountered, add `derive` attribute and let everything happen there (workaround
+    // to help parsing cfg_attr correctly).
     let item = syn::parse2::<syn::Item>(input)?;
-    let opts = syn::parse2(attr)?;
+    if let syn::Item::Struct(s) = item {
+        let opts: BindgenAttrs = syn::parse2(attr.clone())?;
+        let wasm_bindgen = opts
+            .wasm_bindgen()
+            .cloned()
+            .unwrap_or_else(|| syn::parse_quote! { wasm_bindgen });
 
+        let item = quote! {
+            #[derive(#wasm_bindgen::__rt::BindgenedStruct)]
+            #[wasm_bindgen(#attr)]
+            #s
+        };
+        return Ok(item);
+    }
+
+    let opts = syn::parse2(attr)?;
     let mut tokens = proc_macro2::TokenStream::new();
     let mut program = backend::ast::Program::default();
     item.macro_parse(&mut program, (Some(opts), &mut tokens))?;
@@ -76,10 +93,11 @@ pub fn expand_class_marker(
     // We manually implement `ToTokens for ImplItemFn` here, injecting our
     // program's tokens before the actual method's inner body tokens.
     let mut tokens = proc_macro2::TokenStream::new();
-    tokens.append_all(item.attrs.iter().filter(|attr| match attr.style {
-        syn::AttrStyle::Outer => true,
-        _ => false,
-    }));
+    tokens.append_all(
+        item.attrs
+            .iter()
+            .filter(|attr| matches!(attr.style, syn::AttrStyle::Outer)),
+    );
     item.vis.to_tokens(&mut tokens);
     item.sig.to_tokens(&mut tokens);
     let mut err = None;
@@ -88,10 +106,11 @@ pub fn expand_class_marker(
             err = Some(e);
         }
         parser::check_unused_attrs(tokens); // same as above
-        tokens.append_all(item.attrs.iter().filter(|attr| match attr.style {
-            syn::AttrStyle::Inner(_) => true,
-            _ => false,
-        }));
+        tokens.append_all(
+            item.attrs
+                .iter()
+                .filter(|attr| matches!(attr.style, syn::AttrStyle::Inner(_))),
+        );
         tokens.append_all(&item.block.stmts);
     });
 
@@ -113,7 +132,11 @@ impl Parse for ClassMarker {
     fn parse(input: ParseStream) -> SynResult<Self> {
         let class = input.parse::<syn::Ident>()?;
         input.parse::<Token![=]>()?;
-        let js_class = input.parse::<syn::LitStr>()?.value();
+        let mut js_class = input.parse::<syn::LitStr>()?.value();
+        js_class = js_class
+            .strip_prefix("r#")
+            .map(String::from)
+            .unwrap_or(js_class);
 
         let mut wasm_bindgen = None;
         let mut wasm_bindgen_futures = None;
@@ -161,4 +184,20 @@ impl Parse for ClassMarker {
                 .unwrap_or_else(|| syn::parse_quote! { wasm_bindgen_futures }),
         })
     }
+}
+
+pub fn expand_struct_marker(item: TokenStream) -> Result<TokenStream, Diagnostic> {
+    parser::reset_attrs_used();
+
+    let mut s: syn::ItemStruct = syn::parse2(item)?;
+
+    let mut program = backend::ast::Program::default();
+    program.structs.push((&mut s).convert(&program)?);
+
+    let mut tokens = proc_macro2::TokenStream::new();
+    program.try_to_tokens(&mut tokens)?;
+
+    parser::check_unused_attrs(&mut tokens);
+
+    Ok(tokens)
 }

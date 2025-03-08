@@ -1,5 +1,8 @@
+use std::borrow::Cow;
+
 use proc_macro2::{Ident, Span};
 use wasm_bindgen_backend::util::{ident_ty, leading_colon_path_ty, raw_ident, rust_ident};
+use weedle::attribute::{ExtendedAttribute, ExtendedAttributeList};
 use weedle::common::Identifier;
 use weedle::term;
 use weedle::types::*;
@@ -28,51 +31,54 @@ pub(crate) enum IdlType<'a> {
     Object,
     Symbol,
     Error,
-    Callback,
-    Iterator,
 
     ArrayBuffer,
-    DataView,
+    DataView {
+        allow_shared: bool,
+    },
     Int8Array {
+        allow_shared: bool,
         immutable: bool,
     },
     Uint8Array {
+        allow_shared: bool,
         immutable: bool,
     },
     Uint8ClampedArray {
+        allow_shared: bool,
         immutable: bool,
     },
     Int16Array {
+        allow_shared: bool,
         immutable: bool,
     },
     Uint16Array {
+        allow_shared: bool,
         immutable: bool,
     },
     Int32Array {
+        allow_shared: bool,
         immutable: bool,
     },
     Uint32Array {
+        allow_shared: bool,
         immutable: bool,
     },
     Float32Array {
+        allow_shared: bool,
         immutable: bool,
     },
     Float64Array {
+        allow_shared: bool,
         immutable: bool,
     },
     ArrayBufferView {
+        allow_shared: bool,
         immutable: bool,
     },
     BufferSource {
+        allow_shared: bool,
         immutable: bool,
-    },
-
-    Interface(&'a str),
-    Dictionary(&'a str),
-    Enum(&'a str),
-    CallbackInterface {
-        name: &'a str,
-        single_function: bool,
     },
 
     Nullable(Box<IdlType<'a>>),
@@ -85,7 +91,68 @@ pub(crate) enum IdlType<'a> {
     Any,
     Undefined,
 
-    UnknownInterface(&'a str),
+    UnknownIdentifier(&'a str),
+
+    Identifier {
+        name: &'a str,
+        ty: IdentifierType<'a>,
+    },
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Debug)]
+pub(crate) enum IdentifierType<'a> {
+    Callback,
+    Iterator,
+    AsyncIterator,
+    Interface(&'a str),
+    Dictionary(&'a str),
+    Enum(&'a str),
+    CallbackInterface {
+        name: &'a str,
+        single_function: bool,
+    },
+    // DOMTimeStamp
+    UnsignedLongLong,
+    // AllowSharedBufferSource
+    AllowSharedBufferSource {
+        immutable: bool,
+    },
+    Int8Slice {
+        allow_shared: bool,
+        immutable: bool,
+    },
+    Uint8Slice {
+        allow_shared: bool,
+        immutable: bool,
+    },
+    Uint8ClampedSlice {
+        allow_shared: bool,
+        immutable: bool,
+    },
+    Int16Slice {
+        allow_shared: bool,
+        immutable: bool,
+    },
+    Uint16Slice {
+        allow_shared: bool,
+        immutable: bool,
+    },
+    Int32Slice {
+        allow_shared: bool,
+        immutable: bool,
+    },
+    Uint32Slice {
+        allow_shared: bool,
+        immutable: bool,
+    },
+    Float32Slice {
+        allow_shared: bool,
+        immutable: bool,
+    },
+    Float64Slice {
+        allow_shared: bool,
+        immutable: bool,
+    },
 }
 
 pub(crate) trait ToIdlType<'a> {
@@ -319,23 +386,27 @@ impl<'a> ToIdlType<'a> for AttributedNonAnyType<'a> {
 
 impl<'a> ToIdlType<'a> for Identifier<'a> {
     fn to_idl_type(&self, record: &FirstPassRecord<'a>) -> IdlType<'a> {
-        if self.0 == "DOMTimeStamp" {
+        let ty = if self.0 == "DOMTimeStamp" {
             // https://heycam.github.io/webidl/#DOMTimeStamp
-            IdlType::UnsignedLongLong
+            IdentifierType::UnsignedLongLong
+        } else if self.0 == "AllowSharedBufferSource" {
+            IdentifierType::AllowSharedBufferSource { immutable: false }
         } else if let Some(idl_type) = record.typedefs.get(&self.0) {
-            idl_type.to_idl_type(record)
+            return idl_type.to_idl_type(record);
         } else if record.interfaces.contains_key(self.0) {
-            IdlType::Interface(self.0)
+            IdentifierType::Interface(self.0)
         } else if record.dictionaries.contains_key(self.0) {
-            IdlType::Dictionary(self.0)
+            IdentifierType::Dictionary(self.0)
         } else if record.enums.contains_key(self.0) {
-            IdlType::Enum(self.0)
+            IdentifierType::Enum(self.0)
         } else if record.callbacks.contains(self.0) {
-            IdlType::Callback
+            IdentifierType::Callback
         } else if record.iterators.contains(self.0) {
-            IdlType::Iterator
+            IdentifierType::Iterator
+        } else if record.async_iterators.contains(self.0) {
+            IdentifierType::AsyncIterator
         } else if let Some(data) = record.callback_interfaces.get(self.0) {
-            IdlType::CallbackInterface {
+            IdentifierType::CallbackInterface {
                 name: self.0,
                 single_function: data.single_function,
             }
@@ -346,10 +417,20 @@ impl<'a> ToIdlType<'a> for Identifier<'a> {
             //
             // namely this seems to be "legalese" for "this is a `Window`", so
             // let's translate it as such.
-            IdlType::Interface("Window")
+            IdentifierType::Interface("Window")
         } else {
             log::warn!("Unrecognized type: {}", self.0);
-            IdlType::UnknownInterface(self.0)
+            return IdlType::UnknownIdentifier(self.0);
+        };
+
+        IdlType::id(self.0, ty)
+    }
+}
+
+impl<'a> ToIdlType<'a> for term::DataView {
+    fn to_idl_type(&self, _record: &FirstPassRecord<'a>) -> IdlType<'a> {
+        IdlType::DataView {
+            allow_shared: false,
         }
     }
 }
@@ -371,7 +452,7 @@ macro_rules! terms_to_idl_type_maybe_immutable {
     ($($t:tt => $r:tt)*) => ($(
         impl<'a> ToIdlType<'a> for term::$t {
             fn to_idl_type(&self, _record: &FirstPassRecord<'a>) -> IdlType<'a> {
-                IdlType::$r { immutable: false }
+                IdlType::$r { allow_shared: false, immutable: false }
             }
         }
     )*);
@@ -393,7 +474,6 @@ terms_to_idl_type! {
     Short => Short
     Undefined => Undefined
     ArrayBuffer => ArrayBuffer
-    DataView => DataView
     Error => Error
 }
 
@@ -417,6 +497,10 @@ pub enum TypeError {
 }
 
 impl<'a> IdlType<'a> {
+    fn id(name: &'a str, ty: IdentifierType<'a>) -> Self {
+        IdlType::Identifier { name, ty }
+    }
+
     /// Generates a snake case type name.
     pub(crate) fn push_snake_case_name(&self, dst: &mut String) {
         match self {
@@ -435,11 +519,9 @@ impl<'a> IdlType<'a> {
             IdlType::Object => dst.push_str("object"),
             IdlType::Symbol => dst.push_str("symbol"),
             IdlType::Error => dst.push_str("error"),
-            IdlType::Callback => dst.push_str("callback"),
-            IdlType::Iterator => dst.push_str("iterator"),
 
             IdlType::ArrayBuffer => dst.push_str("array_buffer"),
-            IdlType::DataView => dst.push_str("data_view"),
+            IdlType::DataView { .. } => dst.push_str("data_view"),
             IdlType::Int8Array { .. } => dst.push_str("i8_array"),
             IdlType::Uint8Array { .. } => dst.push_str("u8_array"),
             IdlType::Uint8ClampedArray { .. } => dst.push_str("u8_clamped_array"),
@@ -452,11 +534,7 @@ impl<'a> IdlType<'a> {
             IdlType::ArrayBufferView { .. } => dst.push_str("array_buffer_view"),
             IdlType::BufferSource { .. } => dst.push_str("buffer_source"),
 
-            IdlType::Interface(name) => dst.push_str(&snake_case_ident(name)),
-            IdlType::UnknownInterface(name) => dst.push_str(&snake_case_ident(name)),
-            IdlType::Dictionary(name) => dst.push_str(&snake_case_ident(name)),
-            IdlType::Enum(name) => dst.push_str(&snake_case_ident(name)),
-            IdlType::CallbackInterface { name, .. } => dst.push_str(&snake_case_ident(name)),
+            IdlType::UnknownIdentifier(name) => dst.push_str(&snake_case_ident(name)),
 
             IdlType::Nullable(idl_type) => {
                 dst.push_str("opt_");
@@ -495,11 +573,44 @@ impl<'a> IdlType<'a> {
 
             IdlType::Any => dst.push_str("any"),
             IdlType::Undefined => dst.push_str("undefined"),
+
+            IdlType::Identifier { ty, .. } => match ty {
+                IdentifierType::Callback => dst.push_str("callback"),
+                IdentifierType::Iterator => dst.push_str("iterator"),
+                IdentifierType::AsyncIterator => dst.push_str("async_iterator"),
+                IdentifierType::Interface(name) => dst.push_str(&snake_case_ident(name)),
+                IdentifierType::Dictionary(name) => dst.push_str(&snake_case_ident(name)),
+                IdentifierType::Enum(name) => dst.push_str(&snake_case_ident(name)),
+                IdentifierType::CallbackInterface { name, .. } => {
+                    dst.push_str(&snake_case_ident(name))
+                }
+                IdentifierType::UnsignedLongLong => {
+                    IdlType::UnsignedLongLong.push_snake_case_name(dst)
+                }
+                IdentifierType::AllowSharedBufferSource { immutable } => IdlType::BufferSource {
+                    allow_shared: true,
+                    immutable: *immutable,
+                }
+                .push_snake_case_name(dst),
+                IdentifierType::Int8Slice { .. } => dst.push_str("i8_slice"),
+                IdentifierType::Uint8Slice { .. } => dst.push_str("u8_slice"),
+                IdentifierType::Uint8ClampedSlice { .. } => dst.push_str("u8_clamped_slice"),
+                IdentifierType::Int16Slice { .. } => dst.push_str("i16_slice"),
+                IdentifierType::Uint16Slice { .. } => dst.push_str("u16_slice"),
+                IdentifierType::Int32Slice { .. } => dst.push_str("i32_slice"),
+                IdentifierType::Uint32Slice { .. } => dst.push_str("u32_slice"),
+                IdentifierType::Float32Slice { .. } => dst.push_str("f32_slice"),
+                IdentifierType::Float64Slice { .. } => dst.push_str("f64_slice"),
+            },
         }
     }
 
     /// Converts to syn type if possible.
-    pub(crate) fn to_syn_type(&self, pos: TypePosition) -> Result<Option<syn::Type>, TypeError> {
+    pub(crate) fn to_syn_type(
+        &self,
+        pos: TypePosition,
+        legacy: bool,
+    ) -> Result<Option<syn::Type>, TypeError> {
         let externref = |ty| {
             Some(match pos {
                 TypePosition::Argument => shared_ref(ty, false),
@@ -513,6 +624,14 @@ impl<'a> IdlType<'a> {
         };
         let js_value = {
             let path = vec![rust_ident("wasm_bindgen"), rust_ident("JsValue")];
+            externref(leading_colon_path_ty(path))
+        };
+        let string = {
+            let path = vec![
+                rust_ident("alloc"),
+                rust_ident("string"),
+                rust_ident("String"),
+            ];
             externref(leading_colon_path_ty(path))
         };
         match self {
@@ -544,37 +663,57 @@ impl<'a> IdlType<'a> {
             IdlType::UnrestrictedDouble => Ok(Some(ident_ty(raw_ident("f64")))),
             IdlType::DomString | IdlType::ByteString | IdlType::UsvString => match pos {
                 TypePosition::Argument => Ok(Some(shared_ref(ident_ty(raw_ident("str")), false))),
-                TypePosition::Return => Ok(Some(ident_ty(raw_ident("String")))),
+                TypePosition::Return => Ok(string),
             },
             IdlType::Object => Ok(js_sys("Object")),
             IdlType::Symbol => Err(TypeError::CannotConvert),
             IdlType::Error => Err(TypeError::CannotConvert),
 
             IdlType::ArrayBuffer => Ok(js_sys("ArrayBuffer")),
-            IdlType::DataView => Ok(js_sys("DataView")),
-            IdlType::Int8Array { immutable } => Ok(Some(array("i8", pos, *immutable))),
-            IdlType::Uint8Array { immutable } => Ok(Some(array("u8", pos, *immutable))),
-            IdlType::Uint8ClampedArray { immutable } => {
-                Ok(Some(clamped(array("u8", pos, *immutable))))
-            }
-            IdlType::Int16Array { immutable } => Ok(Some(array("i16", pos, *immutable))),
-            IdlType::Uint16Array { immutable } => Ok(Some(array("u16", pos, *immutable))),
-            IdlType::Int32Array { immutable } => Ok(Some(array("i32", pos, *immutable))),
-            IdlType::Uint32Array { immutable } => Ok(Some(array("u32", pos, *immutable))),
-            IdlType::Float32Array { immutable } => Ok(Some(array("f32", pos, *immutable))),
-            IdlType::Float64Array { immutable } => Ok(Some(array("f64", pos, *immutable))),
+            IdlType::DataView { .. } => Ok(js_sys("DataView")),
+            IdlType::Int8Array { immutable, .. } => match (legacy, pos) {
+                (true, _) | (_, TypePosition::Return) => Ok(Some(array("i8", pos, *immutable))),
+                (false, TypePosition::Argument) => Ok(js_sys("Int8Array")),
+            },
+            IdlType::Uint8Array { immutable, .. } => match (legacy, pos) {
+                (true, _) | (_, TypePosition::Return) => Ok(Some(array("u8", pos, *immutable))),
+                (false, TypePosition::Argument) => Ok(js_sys("Uint8Array")),
+            },
+            IdlType::Uint8ClampedArray { immutable, .. } => match (legacy, pos) {
+                (true, _) | (_, TypePosition::Return) => {
+                    Ok(Some(clamped(array("u8", pos, *immutable))))
+                }
+                (false, TypePosition::Argument) => Ok(js_sys("Uint8ClampedArray")),
+            },
+            IdlType::Int16Array { immutable, .. } => match (legacy, pos) {
+                (true, _) | (_, TypePosition::Return) => Ok(Some(array("i16", pos, *immutable))),
+                (false, TypePosition::Argument) => Ok(js_sys("Int16Array")),
+            },
+            IdlType::Uint16Array { immutable, .. } => match (legacy, pos) {
+                (true, _) | (_, TypePosition::Return) => Ok(Some(array("u16", pos, *immutable))),
+                (false, TypePosition::Argument) => Ok(js_sys("Uint16Array")),
+            },
+            IdlType::Int32Array { immutable, .. } => match (legacy, pos) {
+                (true, _) | (_, TypePosition::Return) => Ok(Some(array("i32", pos, *immutable))),
+                (false, TypePosition::Argument) => Ok(js_sys("Int32Array")),
+            },
+            IdlType::Uint32Array { immutable, .. } => match (legacy, pos) {
+                (true, _) | (_, TypePosition::Return) => Ok(Some(array("u32", pos, *immutable))),
+                (false, TypePosition::Argument) => Ok(js_sys("Uint32Array")),
+            },
+            IdlType::Float32Array { immutable, .. } => match (legacy, pos) {
+                (true, _) | (_, TypePosition::Return) => Ok(Some(array("f32", pos, *immutable))),
+                (false, TypePosition::Argument) => Ok(js_sys("Float32Array")),
+            },
+            IdlType::Float64Array { immutable, .. } => match (legacy, pos) {
+                (true, _) | (_, TypePosition::Return) => Ok(Some(array("f64", pos, *immutable))),
+                (false, TypePosition::Argument) => Ok(js_sys("Float64Array")),
+            },
 
             IdlType::ArrayBufferView { .. } | IdlType::BufferSource { .. } => Ok(js_sys("Object")),
-            IdlType::Interface(name)
-            | IdlType::Dictionary(name)
-            | IdlType::CallbackInterface { name, .. } => {
-                let ty = ident_ty(rust_ident(camel_case_ident(name).as_str()));
-                Ok(externref(ty))
-            }
-            IdlType::Enum(name) => Ok(Some(ident_ty(rust_ident(camel_case_ident(name).as_str())))),
 
             IdlType::Nullable(idl_type) => {
-                let inner = idl_type.to_syn_type(pos)?;
+                let inner = idl_type.to_syn_type(pos, legacy)?;
 
                 match inner {
                     Some(inner) => {
@@ -610,7 +749,7 @@ impl<'a> IdlType<'a> {
                 TypePosition::Return => Ok(js_sys("Array")),
             },
             IdlType::Promise(_idl_type) => Ok(js_sys("Promise")),
-            IdlType::Record(_idl_type_from, _idl_type_to) => Err(TypeError::CannotConvert),
+            IdlType::Record(_idl_type_from, _idl_type_to) => Ok(js_sys("Object")),
             IdlType::Union(idl_types) => {
                 // Note that most union types have already been expanded to
                 // their components via `flatten`. Unions in a return position
@@ -635,21 +774,25 @@ impl<'a> IdlType<'a> {
                 //    Such an enum, however, might have a relatively high
                 //    overhead in creating it from a JS value, but would be
                 //    cheap to convert from a variant back to a JS value.
-                if idl_types.iter().all(|idl_type| match idl_type {
-                    IdlType::Interface(..) => true,
-                    _ => false,
+                if idl_types.iter().all(|idl_type| {
+                    matches!(
+                        idl_type,
+                        IdlType::Identifier {
+                            ty: IdentifierType::Interface(..),
+                            ..
+                        }
+                    )
                 }) {
-                    IdlType::Object.to_syn_type(pos)
+                    IdlType::Object.to_syn_type(pos, legacy)
                 } else {
-                    IdlType::Any.to_syn_type(pos)
+                    IdlType::Any.to_syn_type(pos, legacy)
                 }
             }
 
             IdlType::Any => Ok(js_value),
             IdlType::Undefined => Ok(None),
-            IdlType::Callback => Ok(js_sys("Function")),
-            IdlType::Iterator => Ok(js_sys("Iterator")),
-            IdlType::UnknownInterface(_) => Err(TypeError::CannotConvert),
+            IdlType::Identifier { ty, .. } => ty.to_syn_type(pos, legacy),
+            IdlType::UnknownIdentifier(_) => Err(TypeError::CannotConvert),
         }
     }
 
@@ -659,36 +802,36 @@ impl<'a> IdlType<'a> {
     /// but also flattens unions inside generics of other types.
     ///
     /// [flattened union member types]: https://heycam.github.io/webidl/#dfn-flattened-union-member-types
-    pub(crate) fn flatten(&self) -> Vec<Self> {
+    pub(crate) fn flatten(&self, attrs: Option<&ExtendedAttributeList<'_>>) -> Vec<Self> {
         match self {
             IdlType::Nullable(idl_type) => idl_type
-                .flatten()
+                .flatten(attrs)
                 .into_iter()
                 .map(Box::new)
                 .map(IdlType::Nullable)
                 .collect(),
             IdlType::FrozenArray(idl_type) => idl_type
-                .flatten()
+                .flatten(attrs)
                 .into_iter()
                 .map(Box::new)
                 .map(IdlType::FrozenArray)
                 .collect(),
             IdlType::Sequence(idl_type) => idl_type
-                .flatten()
+                .flatten(attrs)
                 .into_iter()
                 .map(Box::new)
                 .map(IdlType::Sequence)
                 .collect(),
             IdlType::Promise(idl_type) => idl_type
-                .flatten()
+                .flatten(attrs)
                 .into_iter()
                 .map(Box::new)
                 .map(IdlType::Promise)
                 .collect(),
             IdlType::Record(idl_type_from, idl_type_to) => {
                 let mut idl_types = Vec::new();
-                for idl_type_from in idl_type_from.flatten() {
-                    for idl_type_to in idl_type_to.flatten() {
+                for idl_type_from in idl_type_from.flatten(attrs) {
+                    for idl_type_to in idl_type_to.flatten(attrs) {
                         idl_types.push(IdlType::Record(
                             Box::new(idl_type_from.clone()),
                             Box::new(idl_type_to.clone()),
@@ -699,74 +842,350 @@ impl<'a> IdlType<'a> {
             }
             IdlType::Union(idl_types) => idl_types
                 .iter()
-                .flat_map(|idl_type| idl_type.flatten())
+                .flat_map(|idl_type| idl_type.flatten(attrs))
                 .collect(),
-            IdlType::ArrayBufferView { immutable } => vec![
-                IdlType::ArrayBufferView {
+            IdlType::ArrayBufferView {
+                allow_shared,
+                immutable,
+            } => {
+                let view = IdlType::ArrayBufferView {
+                    allow_shared: *allow_shared,
                     immutable: *immutable,
-                },
-                IdlType::Uint8Array {
-                    immutable: *immutable,
-                },
-            ],
-            IdlType::BufferSource { immutable } => vec![
+                };
+
+                if let Some(attrs) = attrs {
+                    for attr in &attrs.body.list {
+                        if let ExtendedAttribute::NoArgs(attr) = attr {
+                            if attr.0 .0 == "RustNotWasmMemory" {
+                                return vec![view];
+                            }
+                        }
+                    }
+                }
+
+                vec![
+                    view,
+                    IdlType::Identifier {
+                        name: "Uint8Array",
+                        ty: IdentifierType::Uint8Slice {
+                            allow_shared: *allow_shared,
+                            immutable: *immutable,
+                        },
+                    },
+                    IdlType::Uint8Array {
+                        allow_shared: *allow_shared,
+                        immutable: *immutable,
+                    },
+                ]
+            }
+            IdlType::BufferSource {
+                allow_shared,
+                immutable,
+            } => vec![
                 IdlType::BufferSource {
+                    allow_shared: *allow_shared,
                     immutable: *immutable,
                 },
+                IdlType::Identifier {
+                    name: "Uint8Array",
+                    ty: IdentifierType::Uint8Slice {
+                        allow_shared: *allow_shared,
+                        immutable: *immutable,
+                    },
+                },
                 IdlType::Uint8Array {
+                    allow_shared: *allow_shared,
                     immutable: *immutable,
                 },
             ],
             IdlType::LongLong => vec![IdlType::Long, IdlType::Double],
             IdlType::UnsignedLongLong => vec![IdlType::UnsignedLong, IdlType::Double],
-            IdlType::CallbackInterface {
-                name,
-                single_function: true,
-            } => {
-                // According to the webidl spec [1] single-function callback
-                // interfaces can also be replaced in arguments with simply a
-                // single callable function, which we map to a `Callback`.
-                //
-                // [1]: https://heycam.github.io/webidl/#es-user-objects
-                vec![
-                    IdlType::Callback,
-                    IdlType::CallbackInterface {
-                        name,
-                        single_function: false,
+            IdlType::Int8Array {
+                allow_shared,
+                immutable,
+            } => vec![
+                IdlType::Identifier {
+                    name: "Int8Array",
+                    ty: IdentifierType::Int8Slice {
+                        allow_shared: *allow_shared,
+                        immutable: *immutable,
                     },
-                ]
+                },
+                IdlType::Int8Array {
+                    allow_shared: *allow_shared,
+                    immutable: *immutable,
+                },
+            ],
+            IdlType::Uint8Array {
+                allow_shared,
+                immutable,
+            } => vec![
+                IdlType::Identifier {
+                    name: "Uint8Array",
+                    ty: IdentifierType::Uint8Slice {
+                        allow_shared: *allow_shared,
+                        immutable: *immutable,
+                    },
+                },
+                IdlType::Uint8Array {
+                    allow_shared: *allow_shared,
+                    immutable: *immutable,
+                },
+            ],
+            IdlType::Uint8ClampedArray {
+                allow_shared,
+                immutable,
+            } => vec![
+                IdlType::Identifier {
+                    name: "Uint8ClampedArray",
+                    ty: IdentifierType::Uint8ClampedSlice {
+                        allow_shared: *allow_shared,
+                        immutable: *immutable,
+                    },
+                },
+                IdlType::Uint8ClampedArray {
+                    allow_shared: *allow_shared,
+                    immutable: *immutable,
+                },
+            ],
+            IdlType::Int16Array {
+                allow_shared,
+                immutable,
+            } => vec![
+                IdlType::Identifier {
+                    name: "Int16Array",
+                    ty: IdentifierType::Int16Slice {
+                        allow_shared: *allow_shared,
+                        immutable: *immutable,
+                    },
+                },
+                IdlType::Int16Array {
+                    allow_shared: *allow_shared,
+                    immutable: *immutable,
+                },
+            ],
+            IdlType::Uint16Array {
+                allow_shared,
+                immutable,
+            } => vec![
+                IdlType::Identifier {
+                    name: "Uint16Array",
+                    ty: IdentifierType::Uint16Slice {
+                        allow_shared: *allow_shared,
+                        immutable: *immutable,
+                    },
+                },
+                IdlType::Uint16Array {
+                    allow_shared: *allow_shared,
+                    immutable: *immutable,
+                },
+            ],
+            IdlType::Int32Array {
+                allow_shared,
+                immutable,
+            } => vec![
+                IdlType::Identifier {
+                    name: "Int32Array",
+                    ty: IdentifierType::Int32Slice {
+                        allow_shared: *allow_shared,
+                        immutable: *immutable,
+                    },
+                },
+                IdlType::Int32Array {
+                    allow_shared: *allow_shared,
+                    immutable: *immutable,
+                },
+            ],
+            IdlType::Uint32Array {
+                allow_shared,
+                immutable,
+            } => vec![
+                IdlType::Identifier {
+                    name: "Uint32Array",
+                    ty: IdentifierType::Uint32Slice {
+                        allow_shared: *allow_shared,
+                        immutable: *immutable,
+                    },
+                },
+                IdlType::Uint32Array {
+                    allow_shared: *allow_shared,
+                    immutable: *immutable,
+                },
+            ],
+            IdlType::Float32Array {
+                allow_shared,
+                immutable,
+            } => vec![
+                IdlType::Identifier {
+                    name: "Float32Array",
+                    ty: IdentifierType::Float32Slice {
+                        allow_shared: *allow_shared,
+                        immutable: *immutable,
+                    },
+                },
+                IdlType::Float32Array {
+                    allow_shared: *allow_shared,
+                    immutable: *immutable,
+                },
+            ],
+            IdlType::Float64Array {
+                allow_shared,
+                immutable,
+            } => vec![
+                IdlType::Identifier {
+                    name: "Float64Array",
+                    ty: IdentifierType::Float64Slice {
+                        allow_shared: *allow_shared,
+                        immutable: *immutable,
+                    },
+                },
+                IdlType::Float64Array {
+                    allow_shared: *allow_shared,
+                    immutable: *immutable,
+                },
+            ],
+            idl_type @ IdlType::Identifier {
+                name: identifier,
+                ty,
+            } => {
+                match ty {
+                    IdentifierType::CallbackInterface {
+                        name,
+                        single_function: true,
+                    } => {
+                        // According to the webidl spec [1] single-function callback
+                        // interfaces can also be replaced in arguments with simply a
+                        // single callable function, which we map to a `Callback`.
+                        //
+                        // [1]: https://heycam.github.io/webidl/#es-user-objects
+                        vec![
+                            IdlType::id(identifier, IdentifierType::Callback),
+                            IdlType::id(
+                                identifier,
+                                IdentifierType::CallbackInterface {
+                                    name,
+                                    single_function: false,
+                                },
+                            ),
+                        ]
+                    }
+                    IdentifierType::UnsignedLongLong => IdlType::UnsignedLongLong.flatten(attrs),
+                    IdentifierType::AllowSharedBufferSource { immutable } => {
+                        IdlType::BufferSource {
+                            allow_shared: true,
+                            immutable: *immutable,
+                        }
+                        .flatten(attrs)
+                    }
+                    _ => vec![idl_type.clone()],
+                }
             }
-            idl_type @ _ => vec![idl_type.clone()],
+            idl_type => vec![idl_type.clone()],
+        }
+    }
+
+    pub(crate) fn orig(&self) -> Cow<'_, Self> {
+        if let Self::Identifier { name, .. } = self {
+            Cow::Owned(Self::UnknownIdentifier(name))
+        } else {
+            Cow::Borrowed(self)
+        }
+    }
+}
+
+impl IdentifierType<'_> {
+    /// Converts to syn type if possible.
+    pub(crate) fn to_syn_type(
+        &self,
+        pos: TypePosition,
+        legacy: bool,
+    ) -> Result<Option<syn::Type>, TypeError> {
+        let externref = |ty| {
+            Some(match pos {
+                TypePosition::Argument => shared_ref(ty, false),
+                TypePosition::Return => ty,
+            })
+        };
+        let js_sys = |name: &str| {
+            let path = vec![rust_ident("js_sys"), rust_ident(name)];
+            let ty = leading_colon_path_ty(path);
+            externref(ty)
+        };
+        match self {
+            IdentifierType::Callback => Ok(js_sys("Function")),
+            IdentifierType::Iterator => Ok(js_sys("Iterator")),
+            IdentifierType::AsyncIterator => Ok(js_sys("AsyncIterator")),
+            IdentifierType::Interface(name)
+            | IdentifierType::Dictionary(name)
+            | IdentifierType::CallbackInterface { name, .. } => {
+                let ty = ident_ty(rust_ident(camel_case_ident(name).as_str()));
+                Ok(externref(ty))
+            }
+            IdentifierType::Enum(name) => {
+                Ok(Some(ident_ty(rust_ident(camel_case_ident(name).as_str()))))
+            }
+            IdentifierType::UnsignedLongLong => IdlType::UnsignedLongLong.to_syn_type(pos, legacy),
+            IdentifierType::AllowSharedBufferSource { immutable } => IdlType::BufferSource {
+                allow_shared: true,
+                immutable: *immutable,
+            }
+            .to_syn_type(pos, legacy),
+            IdentifierType::Int8Slice { immutable, .. } => Ok(Some(array("i8", pos, *immutable))),
+            IdentifierType::Uint8Slice { immutable, .. } => Ok(Some(array("u8", pos, *immutable))),
+            IdentifierType::Uint8ClampedSlice { immutable, .. } => {
+                Ok(Some(clamped(array("u8", pos, *immutable))))
+            }
+            IdentifierType::Int16Slice { immutable, .. } => Ok(Some(array("i16", pos, *immutable))),
+            IdentifierType::Uint16Slice { immutable, .. } => {
+                Ok(Some(array("u16", pos, *immutable)))
+            }
+            IdentifierType::Int32Slice { immutable, .. } => Ok(Some(array("i32", pos, *immutable))),
+            IdentifierType::Uint32Slice { immutable, .. } => {
+                Ok(Some(array("u32", pos, *immutable)))
+            }
+            IdentifierType::Float32Slice { immutable, .. } => {
+                Ok(Some(array("f32", pos, *immutable)))
+            }
+            IdentifierType::Float64Slice { immutable, .. } => {
+                Ok(Some(array("f64", pos, *immutable)))
+            }
         }
     }
 }
 
 #[test]
 fn idl_type_flatten_test() {
+    use self::IdentifierType::*;
     use self::IdlType::*;
 
     assert_eq!(
         Union(vec![
-            Interface("Node"),
-            Union(vec![Sequence(Box::new(Long),), Interface("Event"),]),
+            IdlType::id("Node", Interface("Node")),
+            Union(vec![
+                Sequence(Box::new(Long),),
+                IdlType::id("Event", Interface("Event"))
+            ]),
             Nullable(Box::new(Union(vec![
-                Interface("XMLHttpRequest"),
+                IdlType::id("XMLHttpRequest", Interface("XMLHttpRequest")),
                 DomString,
             ])),),
             Sequence(Box::new(Union(vec![
                 Sequence(Box::new(Double),),
-                Interface("NodeList"),
+                IdlType::id("NodeList", Interface("NodeList")),
             ])),),
         ])
-        .flatten(),
+        .flatten(None),
         vec![
-            Interface("Node"),
+            IdlType::id("Node", Interface("Node")),
             Sequence(Box::new(Long)),
-            Interface("Event"),
-            Nullable(Box::new(Interface("XMLHttpRequest"))),
+            IdlType::id("Event", Interface("Event")),
+            Nullable(Box::new(IdlType::id(
+                "XMLHttpRequest",
+                Interface("XMLHttpRequest")
+            ))),
             Nullable(Box::new(DomString)),
             Sequence(Box::new(Sequence(Box::new(Double)))),
-            Sequence(Box::new(Interface("NodeList"))),
+            Sequence(Box::new(IdlType::id("NodeList", Interface("NodeList")))),
         ],
     );
 }

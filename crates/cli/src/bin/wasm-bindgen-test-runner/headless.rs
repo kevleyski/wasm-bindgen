@@ -1,18 +1,20 @@
 use crate::shell::Shell;
 use anyhow::{bail, format_err, Context, Error};
-use curl::easy::{Easy, List};
 use log::{debug, warn};
 use rouille::url::Url;
 use serde::{Deserialize, Serialize};
-use serde_json::{self, json, Map, Value as Json};
+use serde_json::{json, Map, Value as Json};
 use std::env;
 use std::fs::File;
-use std::io::{self, Read};
+use std::io::{self, Cursor, ErrorKind, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
+use ureq::Agent;
 
 /// Options that can use to customize and configure a WebDriver session.
 type Capabilities = Map<String, Json>;
@@ -55,40 +57,60 @@ pub struct LegacyNewSessionParameters {
 /// binary, controlling it, running tests, scraping output, displaying output,
 /// etc. It will return `Ok` if all tests finish successfully, and otherwise it
 /// will return an error if some tests failed.
-pub fn run(server: &SocketAddr, shell: &Shell, timeout: u64) -> Result<(), Error> {
+pub fn run(
+    server: &SocketAddr,
+    shell: &Shell,
+    driver_timeout: u64,
+    test_timeout: u64,
+) -> Result<(), Error> {
     let driver = Driver::find()?;
     let mut drop_log: Box<dyn FnMut()> = Box::new(|| ());
     let driver_url = match driver.location() {
         Locate::Remote(url) => Ok(url.clone()),
         Locate::Local((path, args)) => {
-            // Allow tests to run in parallel (in theory) by finding any open port
-            // available for our driver. We can't bind the port for the driver, but
-            // hopefully the OS gives this invocation unique ports across processes
-            let driver_addr = TcpListener::bind("127.0.0.1:0")?.local_addr()?;
-
-            // Spawn the driver binary, collecting its stdout/stderr in separate
-            // threads. We'll print this output later.
-            let mut cmd = Command::new(path);
-            cmd.args(args)
-                .arg(format!("--port={}", driver_addr.port().to_string()));
-            let mut child = BackgroundChild::spawn(&path, &mut cmd, shell)?;
-            drop_log = Box::new(move || child.print_stdio_on_drop = false);
-
             // Wait for the driver to come online and bind its port before we try to
             // connect to it.
             let start = Instant::now();
-            let max = Duration::new(5, 0);
-            let mut bound = false;
-            while start.elapsed() < max {
-                if TcpStream::connect(&driver_addr).is_ok() {
-                    bound = true;
-                    break;
+            let max = Duration::new(driver_timeout, 0);
+
+            let (driver_addr, mut child) = 'outer: loop {
+                // Allow tests to run in parallel (in theory) by finding any open port
+                // available for our driver. We can't bind the port for the driver, but
+                // hopefully the OS gives this invocation unique ports across processes
+                let driver_addr = TcpListener::bind("127.0.0.1:0")?.local_addr()?;
+                // Spawn the driver binary, collecting its stdout/stderr in separate
+                // threads. We'll print this output later.
+                let mut cmd = Command::new(path);
+                cmd.args(args).arg(format!("--port={}", driver_addr.port()));
+                let mut child = BackgroundChild::spawn(path, &mut cmd, shell)?;
+
+                // Wait for the driver to come online and bind its port before we try to
+                // connect to it.
+                loop {
+                    if child.has_failed() {
+                        if start.elapsed() >= max {
+                            bail!("driver failed to start")
+                        }
+
+                        println!("Failed to start driver, trying again ...");
+
+                        thread::sleep(Duration::from_millis(100));
+                        break;
+                    } else if TcpStream::connect(driver_addr).is_ok() {
+                        break 'outer (driver_addr, child);
+                    } else if start.elapsed() >= max {
+                        bail!("driver failed to bind port during startup")
+                    } else {
+                        thread::sleep(Duration::from_millis(100));
+                    }
                 }
-                thread::sleep(Duration::from_millis(100));
-            }
-            if !bound {
-                bail!("driver failed to bind port during startup")
-            }
+            };
+
+            drop_log = Box::new(move || {
+                let _ = &child;
+                child.print_stdio_on_drop = false;
+            });
+
             Url::parse(&format!("http://{}", driver_addr)).map_err(Error::from)
         }
     }?;
@@ -99,7 +121,7 @@ pub fn run(server: &SocketAddr, shell: &Shell, timeout: u64) -> Result<(), Error
     );
 
     let mut client = Client {
-        handle: Easy::new(),
+        agent: Agent::new(),
         driver_url,
         session: None,
     };
@@ -122,7 +144,20 @@ pub fn run(server: &SocketAddr, shell: &Shell, timeout: u64) -> Result<(), Error
 
     // Visit our local server to open up the page that runs tests, and then get
     // some handles to objects on the page which we'll be scraping output from.
-    let url = format!("http://{}", server);
+    //
+    // If WASM_BINDGEN_TEST_ADDRESS is set, use it as the local server URL,
+    // trying to inherit the port from the server if it isn't specified.
+    let url = match std::env::var("WASM_BINDGEN_TEST_ADDRESS") {
+        Ok(u) => {
+            let mut url = Url::parse(&u)?;
+            if url.port().is_none() {
+                url.set_port(Some(server.port())).unwrap();
+            }
+            url.to_string()
+        }
+        Err(_) => format!("http://{}", server),
+    };
+
     shell.status(&format!("Visiting {}...", url));
     client.goto(&id, &url)?;
     shell.status("Loading page elements...");
@@ -145,7 +180,7 @@ pub fn run(server: &SocketAddr, shell: &Shell, timeout: u64) -> Result<(), Error
     //       information.
     shell.status("Waiting for test to finish...");
     let start = Instant::now();
-    let max = Duration::new(timeout, 0);
+    let max = Duration::new(test_timeout, 0);
     while start.elapsed() < max {
         if client.text(&id, &output)?.contains("test result: ") {
             break;
@@ -171,18 +206,19 @@ pub fn run(server: &SocketAddr, shell: &Shell, timeout: u64) -> Result<(), Error
         drop_log();
     } else {
         println!("Failed to detect test as having been run. It might have timed out.");
-        if output.len() > 0 {
+        if !output.is_empty() {
             println!("output div contained:\n{}", tab(&output));
         }
     }
-    if logs.len() > 0 {
-        println!("console.log div contained:\n{}", tab(&logs));
-    }
-    if errors.len() > 0 {
-        println!("console.log div contained:\n{}", tab(&errors));
-    }
 
     if !output.contains("test result: ok") {
+        if !logs.is_empty() {
+            println!("console.log div contained:\n{}", tab(&logs));
+        }
+        if !errors.is_empty() {
+            println!("console.log div contained:\n{}", tab(&errors));
+        }
+
         bail!("some tests failed")
     }
 
@@ -234,10 +270,7 @@ impl Driver {
         for (driver, ctor) in drivers.iter() {
             let env = format!("{}_REMOTE", driver.to_uppercase());
             let url = match env::var(&env) {
-                Ok(var) => match Url::parse(&var) {
-                    Ok(url) => url,
-                    Err(_) => continue,
-                },
+                Ok(var) => Url::parse(&var).context(format!("failed to parse `{env}`"))?,
                 Err(_) => continue,
             };
             return Ok(ctor(Locate::Remote(url)));
@@ -319,7 +352,7 @@ an issue against rustwasm/wasm-bindgen!
 }
 
 struct Client {
-    handle: Easy,
+    agent: Agent,
     driver_url: Url,
     session: Option<String>,
 }
@@ -331,7 +364,7 @@ enum Method<'a> {
 }
 
 // Below here is a bunch of details of the WebDriver protocol implementation.
-// I'm not too too familiar with them myself, but these seem to work! I mostly
+// I'm not too familiar with them myself, but these seem to work! I mostly
 // copied the `webdriver-client` crate when writing the below bindings.
 
 impl Client {
@@ -461,8 +494,7 @@ impl Client {
     fn close_window(&mut self, id: &str) -> Result<(), Error> {
         #[derive(Deserialize)]
         struct Response {}
-        let x: Response = self.delete(&format!("/session/{}/window", id))?;
-        drop(x);
+        let _: Response = self.delete(&format!("/session/{}/window", id))?;
         Ok(())
     }
 
@@ -477,8 +509,7 @@ impl Client {
         let request = Request {
             url: url.to_string(),
         };
-        let x: Response = self.post(&format!("/session/{}/url", id), &request)?;
-        drop(x);
+        let _: Response = self.post(&format!("/session/{}/url", id), &request)?;
         Ok(())
     }
 
@@ -505,10 +536,10 @@ impl Client {
             value: selector.to_string(),
         };
         let x: Response = self.post(&format!("/session/{}/element", id), &request)?;
-        Ok(x.value
+        x.value
             .gecko_reference
             .or(x.value.safari_reference)
-            .ok_or(format_err!("failed to find element reference in response"))?)
+            .ok_or(format_err!("failed to find element reference in response"))
     }
 
     fn text(&mut self, id: &str, element: &str) -> Result<String, Error> {
@@ -551,37 +582,24 @@ impl Client {
 
     fn doit(&mut self, path: &str, method: Method) -> Result<String, Error> {
         let url = self.driver_url.join(path)?;
-        self.handle.reset();
-        self.handle.url(url.as_str())?;
-        match method {
-            Method::Post(data) => {
-                self.handle.post(true)?;
-                self.handle
-                    .http_headers(build_headers(&["Content-Type: application/json"]))?;
-                self.handle.post_fields_copy(data.as_bytes())?;
-            }
-            Method::Delete => self.handle.custom_request("DELETE")?,
-            Method::Get => self.handle.get(true)?,
-        }
-        let mut result = Vec::new();
-        {
-            let mut t = self.handle.transfer();
-            t.write_function(|buf| {
-                result.extend_from_slice(buf);
-                Ok(buf.len())
-            })?;
-            t.perform()?
-        }
-        let result = String::from_utf8_lossy(&result);
-        if self.handle.response_code()? != 200 {
-            bail!(
-                "non-200 response code: {}\n{}",
-                self.handle.response_code()?,
-                result
-            );
+        let response = match method {
+            Method::Post(data) => self
+                .agent
+                .post(url.as_str())
+                .set("Content-Type", "application/json")
+                .send_bytes(data.as_bytes())?,
+            Method::Delete => self.agent.delete(url.as_str()).call()?,
+            Method::Get => self.agent.get(url.as_str()).call()?,
+        };
+
+        let response_code = response.status();
+        let result = response.into_string()?;
+
+        if response_code != 200 {
+            bail!("non-200 response code: {}\n{}", response_code, result);
         }
         debug!("got: {}", result);
-        Ok(result.into_owned())
+        Ok(result)
     }
 }
 
@@ -597,34 +615,21 @@ impl Drop for Client {
     }
 }
 
-fn build_headers(headers: &[&str]) -> List {
-    let mut list = List::new();
-    for header in headers {
-        list.append(header).unwrap();
-    }
-    list
-}
-
-fn read<R: Read>(r: &mut R) -> io::Result<Vec<u8>> {
-    let mut dst = Vec::new();
-    r.read_to_end(&mut dst)?;
-    Ok(dst)
-}
-
 fn tab(s: &str) -> String {
     let mut result = String::new();
     for line in s.lines() {
         result.push_str("    ");
         result.push_str(line);
-        result.push_str("\n");
+        result.push('\n');
     }
-    return result;
+    result
 }
 
 struct BackgroundChild<'a> {
     child: Child,
     stdout: Option<thread::JoinHandle<io::Result<Vec<u8>>>>,
     stderr: Option<thread::JoinHandle<io::Result<Vec<u8>>>>,
+    any_stderr: Arc<AtomicBool>,
     shell: &'a Shell,
     print_stdio_on_drop: bool,
 }
@@ -644,19 +649,51 @@ impl<'a> BackgroundChild<'a> {
             .context(format!("failed to spawn {:?} binary", path))?;
         let mut stdout = child.stdout.take().unwrap();
         let mut stderr = child.stderr.take().unwrap();
-        let stdout = Some(thread::spawn(move || read(&mut stdout)));
-        let stderr = Some(thread::spawn(move || read(&mut stderr)));
+        let stdout = Some(thread::spawn(move || {
+            let mut dst = Vec::new();
+            stdout.read_to_end(&mut dst)?;
+            Ok(dst)
+        }));
+        let any_stderr = Arc::new(AtomicBool::new(false));
+        let any_stderr_clone = Arc::clone(&any_stderr);
+        let stderr = Some(thread::spawn(move || {
+            let mut dst = Cursor::new(Vec::new());
+            let mut buffer = [0];
+
+            match stderr.read_exact(&mut buffer) {
+                Ok(()) => {
+                    dst.write_all(&buffer).unwrap();
+                    any_stderr_clone.store(true, Ordering::Relaxed);
+                }
+                Err(error) if error.kind() == ErrorKind::UnexpectedEof => {
+                    return Ok(dst.into_inner())
+                }
+                Err(error) => return Err(error),
+            }
+
+            io::copy(&mut stderr, &mut dst)?;
+            Ok(dst.into_inner())
+        }));
         Ok(BackgroundChild {
             child,
             stdout,
             stderr,
+            any_stderr,
             shell,
             print_stdio_on_drop: true,
         })
     }
+
+    fn has_failed(&mut self) -> bool {
+        match self.child.try_wait() {
+            Ok(Some(status)) => !status.success(),
+            Ok(None) => self.any_stderr.load(Ordering::Relaxed),
+            Err(_) => true,
+        }
+    }
 }
 
-impl<'a> Drop for BackgroundChild<'a> {
+impl Drop for BackgroundChild<'_> {
     fn drop(&mut self) {
         self.child.kill().unwrap();
         let status = self.child.wait().unwrap();
@@ -668,11 +705,11 @@ impl<'a> Drop for BackgroundChild<'a> {
         println!("driver status: {}", status);
 
         let stdout = self.stdout.take().unwrap().join().unwrap().unwrap();
-        if stdout.len() > 0 {
+        if !stdout.is_empty() {
             println!("driver stdout:\n{}", tab(&String::from_utf8_lossy(&stdout)));
         }
         let stderr = self.stderr.take().unwrap().join().unwrap().unwrap();
-        if stderr.len() > 0 {
+        if !stderr.is_empty() {
             println!("driver stderr:\n{}", tab(&String::from_utf8_lossy(&stderr)));
         }
     }

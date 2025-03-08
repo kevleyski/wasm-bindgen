@@ -1,4 +1,5 @@
 #![allow(unused_imports)]
+#![allow(clippy::all)]
 use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
 #[doc = "The `RtcRtpTransceiverDirection` enum."]
@@ -10,4 +11,5 @@ pub enum RtcRtpTransceiverDirection {
     Sendonly = "sendonly",
     Recvonly = "recvonly",
     Inactive = "inactive",
+    Stopped = "stopped",
 }

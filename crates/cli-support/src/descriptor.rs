@@ -1,5 +1,7 @@
 use std::char;
 
+use wasm_bindgen_shared::identifier::is_valid_ident;
+
 macro_rules! tys {
     ($($a:ident)*) => (tys! { @ ($($a)*) 0 });
     (@ () $v:expr) => {};
@@ -19,6 +21,8 @@ tys! {
     U32
     I64
     U64
+    I128
+    U128
     F32
     F64
     BOOLEAN
@@ -34,12 +38,14 @@ tys! {
     EXTERNREF
     NAMED_EXTERNREF
     ENUM
+    STRING_ENUM
     RUST_STRUCT
     CHAR
     OPTIONAL
     RESULT
     UNIT
     CLAMPED
+    NONNULL
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -53,6 +59,8 @@ pub enum Descriptor {
     U32,
     I64,
     U64,
+    I128,
+    U128,
     F32,
     F64,
     Boolean,
@@ -66,12 +74,21 @@ pub enum Descriptor {
     String,
     Externref,
     NamedExternref(String),
-    Enum { hole: u32 },
+    Enum {
+        name: String,
+        hole: u32,
+    },
+    StringEnum {
+        name: String,
+        invalid: u32,
+        hole: u32,
+    },
     RustStruct(String),
     Char,
     Option(Box<Descriptor>),
     Result(Box<Descriptor>),
     Unit,
+    NonNull,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -121,11 +138,13 @@ impl Descriptor {
             I16 => Descriptor::I16,
             I32 => Descriptor::I32,
             I64 => Descriptor::I64,
+            I128 => Descriptor::I128,
             U8 if clamped => Descriptor::ClampedU8,
             U8 => Descriptor::U8,
             U16 => Descriptor::U16,
             U32 => Descriptor::U32,
             U64 => Descriptor::U64,
+            U128 => Descriptor::U128,
             F32 => Descriptor::F32,
             F64 => Descriptor::F64,
             BOOLEAN => Descriptor::Boolean,
@@ -149,7 +168,22 @@ impl Descriptor {
             CACHED_STRING => Descriptor::CachedString,
             STRING => Descriptor::String,
             EXTERNREF => Descriptor::Externref,
-            ENUM => Descriptor::Enum { hole: get(data) },
+            ENUM => {
+                let name = get_string(data);
+                let hole = get(data);
+                Descriptor::Enum { name, hole }
+            }
+            STRING_ENUM => {
+                let name = get_string(data);
+                let variant_count = get(data);
+                let invalid = variant_count;
+                let hole = variant_count + 1;
+                Descriptor::StringEnum {
+                    name,
+                    invalid,
+                    hole,
+                }
+            }
             RUST_STRUCT => {
                 let name = get_string(data);
                 Descriptor::RustStruct(name)
@@ -161,6 +195,7 @@ impl Descriptor {
             CHAR => Descriptor::Char,
             UNIT => Descriptor::Unit,
             CLAMPED => Descriptor::_decode(data, true),
+            NONNULL => Descriptor::NonNull,
             other => panic!("unknown descriptor: {}", other),
         }
     }
@@ -273,7 +308,11 @@ impl VectorKind {
             VectorKind::F64 => "Float64Array".to_string(),
             VectorKind::Externref => "any[]".to_string(),
             VectorKind::NamedExternref(ref name) => {
-                format!("({})[]", name)
+                if is_valid_ident(name.as_str()) {
+                    format!("{}[]", name)
+                } else {
+                    format!("({})[]", name)
+                }
             }
         }
     }

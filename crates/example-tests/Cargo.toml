@@ -1,18 +1,26 @@
 [package]
-name = "example-tests"
-version = "0.1.0"
 authors = ["The wasm-bindgen Developers"]
-edition = "2018"
+edition = "2021"
+name = "example-tests"
+publish = false
+version = "0.0.0"
+
+[features]
+default = ["stable"]
+nightly = []
+stable = []
 
 [dependencies]
-anyhow = "1.0.58"
-futures-util = { version = "0.3.21", features = ["sink"] }
-hyper = { version = "0.14.20", features = ["server", "tcp", "http1"] }
-mozprofile = "0.8.0"
-mozrunner = "0.14.0"
+anyhow = "1.0.75"
+futures-util = { version = "0.3.28", features = ["sink"] }
+http = "1"
+hyper = "1"
+hyper-util = { version = "0.1.6", features = ["http1", "service", "server", "tokio"] }
+mozprofile = "0.9"
+mozrunner = "0.15"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tokio = { version = "1.20.0", features = ["macros", "time"] }
-tokio-tungstenite = "0.17.2"
-tower = { version = "0.4.13", features = ["make"] }
-tower-http = { version = "0.3.4", features = ["fs"] }
+tokio = { version = "1.29.1", features = ["macros", "net", "time"] }
+tokio-tungstenite = "0.26"
+tower = { version = "0.5", features = ["make", "util"] }
+tower-http = { version = "0.6", features = ["fs", "util", "set-header"] }

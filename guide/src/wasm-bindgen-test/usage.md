@@ -27,6 +27,13 @@ fn pass() {
 fn fail() {
     assert_eq!(1, 2);
 }
+
+// On a target other then `wasm32-unknown-unknown`, the `#[test]` attribute
+// will be used instead, allowing this test to run on any target.
+#[wasm_bindgen_test(unsupported = test)]
+fn all_targets() {
+    assert_eq!(1, 2);
+}
 ```
 
 Writing tests is the same as normal Rust `#[test]`s, except we are using the
@@ -119,4 +126,10 @@ Run the tests by passing `--target wasm32-unknown-unknown` to `cargo test`:
 
 ```
 cargo test --target wasm32-unknown-unknown
+```
+
+If you also need to run doctests, add the unstable [`-Zdoctest-xcompile`](https://doc.rust-lang.org/nightly/cargo/reference/unstable.html#doctest-xcompile) flag. This requires using the Rust nightly channel like this:
+
+```
+cargo +nightly test --target wasm32-unknown-unknown -Zdoctest-xcompile
 ```

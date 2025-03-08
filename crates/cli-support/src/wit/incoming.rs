@@ -1,8 +1,8 @@
-//! Definition of how to convert Rust types (`Description`) into wasm types
+//! Definition of how to convert Rust types (`Description`) into Wasm types
 //! through adapter functions.
 //!
 //! Note that many Rust types use "nonstandard" instructions which only work in
-//! the JS output, not for the "pure wasm interface types" output.
+//! the JS output, not for the "pure Wasm interface types" output.
 //!
 //! Note that the mirror operation, going from WebAssembly to JS, is found in
 //! the `outgoing.rs` module.
@@ -23,7 +23,7 @@ impl InstructionBuilder<'_, '_> {
         }
         // This is a wrapper around `_incoming` to have a number of sanity checks
         // that we don't forget things. We should always produce at least one
-        // wasm arge and exactly one webidl arg. Additionally the number of
+        // Wasm arge and exactly one webidl arg. Additionally the number of
         // bindings should always match the number of webidl types for now.
         let input_before = self.input.len();
         let output_before = self.output.len();
@@ -43,7 +43,6 @@ impl InstructionBuilder<'_, '_> {
     }
 
     fn _incoming(&mut self, arg: &Descriptor) -> Result<(), Error> {
-        use walrus::ValType as WasmVT;
         match arg {
             Descriptor::Boolean => {
                 self.instruction(
@@ -82,14 +81,28 @@ impl InstructionBuilder<'_, '_> {
                     &[AdapterType::I32],
                 );
             }
-            Descriptor::I8 => self.number(AdapterType::S8, WasmVT::I32),
-            Descriptor::U8 => self.number(AdapterType::U8, WasmVT::I32),
-            Descriptor::I16 => self.number(AdapterType::S16, WasmVT::I32),
-            Descriptor::U16 => self.number(AdapterType::U16, WasmVT::I32),
-            Descriptor::I32 => self.number(AdapterType::S32, WasmVT::I32),
-            Descriptor::U32 => self.number(AdapterType::U32, WasmVT::I32),
-            Descriptor::I64 => self.number(AdapterType::S64, WasmVT::I64),
-            Descriptor::U64 => self.number(AdapterType::U64, WasmVT::I64),
+            Descriptor::I8 => self.number_i32(AdapterType::S8),
+            Descriptor::U8 => self.number_i32(AdapterType::U8),
+            Descriptor::I16 => self.number_i32(AdapterType::S16),
+            Descriptor::U16 => self.number_i32(AdapterType::U16),
+            Descriptor::I32 => self.number_i32(AdapterType::S32),
+            Descriptor::U32 => self.number_i32(AdapterType::U32),
+            Descriptor::I64 => self.number_i64(AdapterType::S64),
+            Descriptor::U64 => self.number_i64(AdapterType::U64),
+            Descriptor::I128 => {
+                self.instruction(
+                    &[AdapterType::S128],
+                    Instruction::Int128ToWasm,
+                    &[AdapterType::I64, AdapterType::I64],
+                );
+            }
+            Descriptor::U128 => {
+                self.instruction(
+                    &[AdapterType::U128],
+                    Instruction::Int128ToWasm,
+                    &[AdapterType::I64, AdapterType::I64],
+                );
+            }
             Descriptor::F32 => {
                 self.get(AdapterType::F32);
                 self.output.push(AdapterType::F32);
@@ -98,7 +111,23 @@ impl InstructionBuilder<'_, '_> {
                 self.get(AdapterType::F64);
                 self.output.push(AdapterType::F64);
             }
-            Descriptor::Enum { .. } => self.number(AdapterType::U32, WasmVT::I32),
+            Descriptor::Enum { name, .. } => {
+                self.instruction(
+                    &[AdapterType::Enum(name.clone())],
+                    Instruction::Int32ToWasm,
+                    &[AdapterType::I32],
+                );
+            },
+            Descriptor::StringEnum { name, invalid, .. } => {
+                self.instruction(
+                    &[AdapterType::StringEnum(name.clone())],
+                    Instruction::StringEnumToWasm {
+                        name: name.clone(),
+                        invalid: *invalid,
+                    },
+                    &[AdapterType::I32],
+                );
+            },
             Descriptor::Ref(d) => self.incoming_ref(false, d)?,
             Descriptor::RefMut(d) => self.incoming_ref(true, d)?,
             Descriptor::Option(d) => self.incoming_option(d)?,
@@ -146,6 +175,12 @@ impl InstructionBuilder<'_, '_> {
 
             // Largely synthetic and can't show up
             Descriptor::ClampedU8 => unreachable!(),
+
+            Descriptor::NonNull => self.instruction(
+                &[AdapterType::NonNull],
+                Instruction::I32FromNonNull,
+                &[AdapterType::I32],
+            ),
         }
         Ok(())
     }
@@ -251,15 +286,29 @@ impl InstructionBuilder<'_, '_> {
                     &[AdapterType::I32],
                 );
             }
-            Descriptor::I8 => self.in_option_sentinel(AdapterType::S8),
-            Descriptor::U8 => self.in_option_sentinel(AdapterType::U8),
-            Descriptor::I16 => self.in_option_sentinel(AdapterType::S16),
-            Descriptor::U16 => self.in_option_sentinel(AdapterType::U16),
-            Descriptor::I32 => self.in_option_native(ValType::I32),
-            Descriptor::U32 => self.in_option_native(ValType::I32),
-            Descriptor::F32 => self.in_option_native(ValType::F32),
+            Descriptor::I8 => self.in_option_sentinel32(AdapterType::S8),
+            Descriptor::U8 => self.in_option_sentinel32(AdapterType::U8),
+            Descriptor::I16 => self.in_option_sentinel32(AdapterType::S16),
+            Descriptor::U16 => self.in_option_sentinel32(AdapterType::U16),
+            Descriptor::I32 => self.in_option_sentinel64_int(AdapterType::I32, true),
+            Descriptor::U32 => self.in_option_sentinel64_int(AdapterType::U32, false),
+            Descriptor::F32 => self.in_option_sentinel64_f32(AdapterType::F32),
             Descriptor::F64 => self.in_option_native(ValType::F64),
             Descriptor::I64 | Descriptor::U64 => self.in_option_native(ValType::I64),
+            Descriptor::I128 => {
+                self.instruction(
+                    &[AdapterType::S128.option()],
+                    Instruction::OptionInt128ToWasm,
+                    &[AdapterType::I32, AdapterType::I64, AdapterType::I64],
+                );
+            }
+            Descriptor::U128 => {
+                self.instruction(
+                    &[AdapterType::U128.option()],
+                    Instruction::OptionInt128ToWasm,
+                    &[AdapterType::I32, AdapterType::I64, AdapterType::I64],
+                );
+            }
             Descriptor::Boolean => {
                 self.instruction(
                     &[AdapterType::Bool.option()],
@@ -274,10 +323,25 @@ impl InstructionBuilder<'_, '_> {
                     &[AdapterType::I32],
                 );
             }
-            Descriptor::Enum { hole } => {
+            Descriptor::Enum { name, hole } => {
                 self.instruction(
-                    &[AdapterType::U32.option()],
+                    &[AdapterType::Enum(name.clone()).option()],
                     Instruction::I32FromOptionEnum { hole: *hole },
+                    &[AdapterType::I32],
+                );
+            }
+            Descriptor::StringEnum {
+                name,
+                invalid,
+                hole,
+            } => {
+                self.instruction(
+                    &[AdapterType::StringEnum(name.clone()).option()],
+                    Instruction::OptionStringEnumToWasm {
+                        name: name.clone(),
+                        invalid: *invalid,
+                        hole: *hole,
+                    },
                     &[AdapterType::I32],
                 );
             }
@@ -321,6 +385,12 @@ impl InstructionBuilder<'_, '_> {
                     &[AdapterType::I32, AdapterType::I32],
                 );
             }
+
+            Descriptor::NonNull => self.instruction(
+                &[AdapterType::NonNull.option()],
+                Instruction::I32FromOptionNonNull,
+                &[AdapterType::I32],
+            ),
 
             _ => bail!(
                 "unsupported optional argument type for calling Rust function from JS: {:?}",
@@ -396,12 +466,11 @@ impl InstructionBuilder<'_, '_> {
         self.output.extend_from_slice(outputs);
     }
 
-    fn number(&mut self, input: AdapterType, output: walrus::ValType) {
-        let instr = Instruction::IntToWasm {
-            input: input.clone(),
-            output,
-        };
-        self.instruction(&[input], instr, &[AdapterType::from_wasm(output).unwrap()]);
+    fn number_i32(&mut self, input: AdapterType) {
+        self.instruction(&[input], Instruction::Int32ToWasm, &[AdapterType::I32]);
+    }
+    fn number_i64(&mut self, input: AdapterType) {
+        self.instruction(&[input], Instruction::Int64ToWasm, &[AdapterType::I64]);
     }
 
     fn in_option_native(&mut self, wasm: ValType) {
@@ -413,11 +482,25 @@ impl InstructionBuilder<'_, '_> {
         );
     }
 
-    fn in_option_sentinel(&mut self, ty: AdapterType) {
+    fn in_option_sentinel32(&mut self, ty: AdapterType) {
         self.instruction(
             &[ty.option()],
             Instruction::I32FromOptionU32Sentinel,
             &[AdapterType::I32],
+        );
+    }
+    fn in_option_sentinel64_int(&mut self, ty: AdapterType, signed: bool) {
+        self.instruction(
+            &[ty.option()],
+            Instruction::F64FromOptionSentinelInt { signed },
+            &[AdapterType::F64],
+        );
+    }
+    fn in_option_sentinel64_f32(&mut self, ty: AdapterType) {
+        self.instruction(
+            &[ty.option()],
+            Instruction::F64FromOptionSentinelF32,
+            &[AdapterType::F64],
         );
     }
 }

@@ -4,6 +4,7 @@ use wasm_bindgen_test::*;
 #[wasm_bindgen(module = "tests/wasm/node.js")]
 extern "C" {
     fn test_works();
+    #[wasm_bindgen(thread_local_v2)]
     static FOO: JsValue;
     fn hit();
 }
@@ -11,7 +12,7 @@ extern "C" {
 #[wasm_bindgen_test]
 fn works() {
     hit();
-    assert_eq!(FOO.as_f64(), Some(1.0));
+    assert_eq!(FOO.with(JsValue::as_f64), Some(1.0));
     test_works();
 }
 
@@ -34,18 +35,19 @@ impl Foo {
     }
 }
 
+// Use a different name to avoid a collision with the `Color` enum in enums.rs when --no-modules is used.
 #[wasm_bindgen]
-pub enum Color {
+pub enum NodeColor {
     Green,
     Yellow,
     Red,
 }
 #[wasm_bindgen]
-pub fn cycle(color: Color) -> Color {
+pub fn cycle(color: NodeColor) -> NodeColor {
     match color {
-        Color::Green => Color::Yellow,
-        Color::Yellow => Color::Red,
-        Color::Red => Color::Green,
+        NodeColor::Green => NodeColor::Yellow,
+        NodeColor::Yellow => NodeColor::Red,
+        NodeColor::Red => NodeColor::Green,
     }
 }
 

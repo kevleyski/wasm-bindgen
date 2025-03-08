@@ -25,11 +25,14 @@ use crate::generator::{
 use crate::idl_type::ToIdlType;
 use crate::traverse::TraverseType;
 use crate::util::{
-    camel_case_ident, is_structural, is_type_unstable, read_dir, shouty_snake_case_ident,
-    snake_case_ident, throws, webidl_const_v_to_backend_const_v, TypePosition,
+    camel_case_ident, get_rust_deprecated, getter_throws, is_structural, is_type_unstable,
+    optional_return_ty, read_dir, setter_throws, shouty_snake_case_ident, snake_case_ident, throws,
+    webidl_const_v_to_backend_const_v, TypePosition,
 };
 use anyhow::Context;
 use anyhow::Result;
+use constants::UNFLATTENED_ATTRIBUTES;
+use idl_type::{IdentifierType, IdlType};
 use proc_macro2::{Ident, TokenStream};
 use quote::ToTokens;
 use sourcefile::SourceFile;
@@ -254,7 +257,7 @@ impl<'src> FirstPassRecord<'src> {
             .iter()
             .map(|v| {
                 let name = if !v.0.is_empty() {
-                    rust_ident(camel_case_ident(&v.0).as_str())
+                    rust_ident(camel_case_ident(v.0).as_str())
                 } else {
                     rust_ident("None")
                 };
@@ -296,7 +299,17 @@ impl<'src> FirstPassRecord<'src> {
 
         let mut fields = Vec::new();
 
-        if !self.append_dictionary_members(&js_name, &mut fields, unstable, unstable_types) {
+        let deprecated = data
+            .definition
+            .and_then(|d| get_rust_deprecated(&d.attributes));
+
+        if !self.append_dictionary_members(
+            &js_name,
+            &mut fields,
+            unstable,
+            unstable_types,
+            &deprecated,
+        ) {
             return;
         }
 
@@ -305,6 +318,7 @@ impl<'src> FirstPassRecord<'src> {
             js_name,
             fields,
             unstable,
+            deprecated,
         }
         .generate(options)
         .to_tokens(&mut program.tokens);
@@ -316,6 +330,7 @@ impl<'src> FirstPassRecord<'src> {
         dst: &mut Vec<DictionaryField>,
         unstable: bool,
         unstable_types: &HashSet<Identifier>,
+        parent_deprecated: &Option<Option<String>>,
     ) -> bool {
         let dict_data = &self.dictionaries[&dict];
         let definition = dict_data.definition.unwrap();
@@ -324,7 +339,13 @@ impl<'src> FirstPassRecord<'src> {
         // > such that inherited dictionary members are ordered before
         // > non-inherited members ...
         if let Some(parent) = &definition.inheritance {
-            if !self.append_dictionary_members(parent.identifier.0, dst, unstable, unstable_types) {
+            if !self.append_dictionary_members(
+                parent.identifier.0,
+                dst,
+                unstable,
+                unstable_types,
+                parent_deprecated,
+            ) {
                 return false;
             }
         }
@@ -343,7 +364,7 @@ impl<'src> FirstPassRecord<'src> {
                 .zip(iter::repeat(unstable || d.stability.is_unstable()))
         });
         for (member, unstable) in members.zip(iter::repeat(unstable)).chain(partials) {
-            match self.dictionary_field(member, unstable, unstable_types) {
+            match self.dictionary_field(member, unstable, unstable_types, parent_deprecated) {
                 Some(f) => dst.push(f),
                 None => {
                     log::warn!(
@@ -362,7 +383,7 @@ impl<'src> FirstPassRecord<'src> {
         }
         dst[start..].sort_by_key(|f| f.js_name.clone());
 
-        return true;
+        true
     }
 
     fn dictionary_field(
@@ -370,26 +391,51 @@ impl<'src> FirstPassRecord<'src> {
         field: &'src DictionaryMember<'src>,
         unstable: bool,
         unstable_types: &HashSet<Identifier>,
+        parent_deprecated: &Option<Option<String>>,
     ) -> Option<DictionaryField> {
         let unstable_override = match unstable {
             true => true,
             false => is_type_unstable(&field.type_, unstable_types),
         };
 
+        let idl_type = field.type_.to_idl_type(self);
+
+        let is_js_value_ref_option_type = match &idl_type {
+            idl_type::IdlType::Nullable(ty) => match **ty {
+                idl_type::IdlType::Any => true,
+                IdlType::FrozenArray(ref _idl_type) | IdlType::Sequence(ref _idl_type) => true,
+                idl_type::IdlType::Union(ref types) => !types.iter().all(|idl_type| {
+                    matches!(
+                        idl_type,
+                        IdlType::Identifier {
+                            ty: IdentifierType::Interface(..),
+                            ..
+                        }
+                    )
+                }),
+                _ => false,
+            },
+            _ => false,
+        };
+
         // use argument position now as we're just binding setters
-        let ty = field
-            .type_
-            .to_idl_type(self)
-            .to_syn_type(TypePosition::Argument)
+        let ty = idl_type
+            .to_syn_type(TypePosition::Argument, false)
             .unwrap_or(None)?;
+
+        let mut return_ty = idl_type
+            .to_syn_type(TypePosition::Return, false)
+            .unwrap()
+            .unwrap();
+
+        if field.required.is_none() {
+            return_ty = optional_return_ty(return_ty);
+        }
 
         // Slice types aren't supported because they don't implement
         // `Into<JsValue>`
         match ty {
-            syn::Type::Reference(ref i) => match &*i.elem {
-                syn::Type::Slice(_) => return None,
-                _ => (),
-            },
+            syn::Type::Reference(ref i) if matches!(&*i.elem, syn::Type::Slice(_)) => return None,
             syn::Type::Path(ref path, ..) =>
             // check that our inner don't contains slices either
             {
@@ -397,9 +443,8 @@ impl<'src> FirstPassRecord<'src> {
                     if let syn::PathArguments::AngleBracketed(ref arg) = seg.arguments {
                         for elem in &arg.args {
                             if let syn::GenericArgument::Type(syn::Type::Reference(ref i)) = elem {
-                                match &*i.elem {
-                                    syn::Type::Slice(_) => return None,
-                                    _ => (),
+                                if matches!(&*i.elem, syn::Type::Slice(_)) {
+                                    return None;
                                 }
                             }
                         }
@@ -414,10 +459,8 @@ impl<'src> FirstPassRecord<'src> {
         let mut any_64bit = false;
 
         ty.traverse_type(&mut |ident| {
-            if !any_64bit {
-                if ident == "u64" || ident == "i64" {
-                    any_64bit = true;
-                }
+            if !any_64bit && (ident == "u64" || ident == "i64") {
+                any_64bit = true;
             }
         });
 
@@ -427,10 +470,14 @@ impl<'src> FirstPassRecord<'src> {
 
         Some(DictionaryField {
             required: field.required.is_some(),
-            name: rust_ident(&snake_case_ident(field.identifier.0)),
+            name: snake_case_ident(field.identifier.0),
             js_name: field.identifier.0.to_string(),
             ty,
+            return_ty,
+            is_js_value_ref_option_type,
             unstable: unstable_override,
+            deprecated: get_rust_deprecated(&field.attributes)
+                .or_else(|| parent_deprecated.clone()),
         })
     }
 
@@ -475,7 +522,10 @@ impl<'src> FirstPassRecord<'src> {
         unstable: bool,
     ) {
         let idl_type = member.definition.const_type.to_idl_type(self);
-        let ty = idl_type.to_syn_type(TypePosition::Return).unwrap().unwrap();
+        let ty = idl_type
+            .to_syn_type(TypePosition::Return, false)
+            .unwrap()
+            .unwrap();
 
         let js_name = member.definition.identifier.0;
         let name = rust_ident(shouty_snake_case_ident(js_name).as_str());
@@ -491,11 +541,11 @@ impl<'src> FirstPassRecord<'src> {
     }
 
     fn append_ns_operation(
-        &self,
-        functions: &mut Vec<Function>,
-        js_name: &'src str,
-        id: &OperationId<'src>,
-        data: &OperationData<'src>,
+        &'src self,
+        functions: &mut Vec<Function<'src>>,
+        js_name: &str,
+        id: &'src OperationId<'src>,
+        data: &'src OperationData<'src>,
     ) {
         match id {
             OperationId::Operation(Some(_)) => {}
@@ -510,7 +560,7 @@ impl<'src> FirstPassRecord<'src> {
             }
         }
 
-        for x in self.create_imports(None, id, data, false, &HashSet::new()) {
+        for x in self.create_imports(None, None, id, data, false, &HashSet::new()) {
             functions.push(Function {
                 name: x.name,
                 js_name: x.js_name,
@@ -530,7 +580,10 @@ impl<'src> FirstPassRecord<'src> {
         unstable: bool,
     ) {
         let idl_type = member.const_type.to_idl_type(self);
-        let ty = idl_type.to_syn_type(TypePosition::Return).unwrap().unwrap();
+        let ty = idl_type
+            .to_syn_type(TypePosition::Return, false)
+            .unwrap()
+            .unwrap();
 
         let js_name = member.identifier.0;
         let name = rust_ident(shouty_snake_case_ident(js_name).as_str());
@@ -589,12 +642,20 @@ impl<'src> FirstPassRecord<'src> {
                 member.identifier.0.to_string(),
                 &member.attributes,
                 data.definition_attributes,
+                &js_name,
                 unstable,
             );
         }
 
         for (id, op_data) in data.operations.iter() {
-            self.member_operation(&mut methods, data, id, op_data, unstable_types);
+            self.member_operation(
+                &name.to_string(),
+                &mut methods,
+                data,
+                id,
+                op_data,
+                unstable_types,
+            );
         }
 
         for mixin_data in self.all_mixins(&js_name) {
@@ -607,22 +668,28 @@ impl<'src> FirstPassRecord<'src> {
                 let member = member.definition;
                 self.member_attribute(
                     &mut attributes,
-                    if let Some(s) = member.stringifier {
-                        Some(weedle::interface::StringifierOrInheritOrStatic::Stringifier(s))
-                    } else {
-                        None
-                    },
+                    member
+                        .stringifier
+                        .map(weedle::interface::StringifierOrInheritOrStatic::Stringifier),
                     member.readonly.is_some(),
                     &member.type_,
                     member.identifier.0.to_string(),
                     &member.attributes,
                     data.definition_attributes,
+                    &js_name,
                     unstable,
                 );
             }
 
             for (id, op_data) in mixin_data.operations.iter() {
-                self.member_operation(&mut methods, data, id, op_data, unstable_types);
+                self.member_operation(
+                    &name.to_string(),
+                    &mut methods,
+                    data,
+                    id,
+                    op_data,
+                    unstable_types,
+                );
             }
         }
 
@@ -650,6 +717,7 @@ impl<'src> FirstPassRecord<'src> {
         js_name: String,
         attrs: &'src Option<ExtendedAttributeList<'src>>,
         container_attrs: Option<&'src ExtendedAttributeList<'src>>,
+        parent_js_name: &str,
         unstable: bool,
     ) {
         use weedle::interface::StringifierOrInheritOrStatic::*;
@@ -664,11 +732,12 @@ impl<'src> FirstPassRecord<'src> {
         let structural = is_structural(attrs.as_ref(), container_attrs);
 
         let catch = throws(attrs);
+        let deprecated: Option<Option<String>> = get_rust_deprecated(attrs);
 
         let ty = type_
             .type_
             .to_idl_type(self)
-            .to_syn_type(TypePosition::Return)
+            .to_syn_type(TypePosition::Return, false)
             .unwrap_or(None);
 
         // Skip types which can't be converted
@@ -677,31 +746,72 @@ impl<'src> FirstPassRecord<'src> {
             attributes.push(InterfaceAttribute {
                 is_static,
                 structural,
-                catch,
+                catch: catch || getter_throws(parent_js_name, &js_name, attrs),
                 ty,
                 js_name: js_name.clone(),
+                rust_name: snake_case_ident(&js_name),
+                deprecated: deprecated.clone(),
                 kind,
                 unstable,
             });
         }
 
         if !readonly {
-            let ty = type_
-                .type_
-                .to_idl_type(self)
-                .to_syn_type(TypePosition::Argument)
-                .unwrap_or(None);
+            let idls = type_.type_.to_idl_type(self).flatten(attrs.as_ref());
+            let any_different_type = idls.len() > 1;
 
-            // Skip types which can't be converted
-            if let Some(ty) = ty {
-                let kind = InterfaceAttributeKind::Setter;
+            if any_different_type
+                && UNFLATTENED_ATTRIBUTES
+                    .get(parent_js_name)
+                    .filter(|list| list.contains(&js_name.as_str()))
+                    .is_some()
+            {
+                let ty = type_
+                    .type_
+                    .to_idl_type(self)
+                    .to_syn_type(TypePosition::Argument, true)
+                    .unwrap_or(None);
+
+                // Skip types which can't be converted
+                if let Some(ty) = ty {
+                    attributes.push(InterfaceAttribute {
+                        is_static,
+                        structural,
+                        catch: catch || setter_throws(parent_js_name, &js_name, attrs),
+                        ty,
+                        js_name: js_name.clone(),
+                        rust_name: format!("set_{}", snake_case_ident(&js_name)),
+                        deprecated: Some(None),
+                        kind: InterfaceAttributeKind::Setter,
+                        unstable,
+                    });
+                }
+            }
+
+            for (idl, ty) in idls.into_iter().filter_map(|idl| {
+                idl.to_syn_type(TypePosition::Argument, false)
+                    .ok()
+                    .flatten()
+                    .map(|ty| (idl, ty))
+            }) {
+                let mut rust_name = format!("set_{}", snake_case_ident(&js_name));
+
+                if any_different_type {
+                    let mut ext = String::new();
+                    idl.push_snake_case_name(&mut ext);
+                    rust_name.push('_');
+                    rust_name.push_str(&snake_case_ident(&ext));
+                }
+
                 attributes.push(InterfaceAttribute {
                     is_static,
                     structural,
-                    catch,
+                    catch: catch || setter_throws(parent_js_name, &js_name, attrs),
                     ty,
-                    js_name,
-                    kind,
+                    js_name: js_name.clone(),
+                    rust_name,
+                    deprecated: deprecated.clone(),
+                    kind: InterfaceAttributeKind::Setter,
                     unstable,
                 });
             }
@@ -709,18 +819,37 @@ impl<'src> FirstPassRecord<'src> {
     }
 
     fn member_operation(
-        &self,
-        methods: &mut Vec<InterfaceMethod>,
+        &'src self,
+        type_name: &str,
+        methods: &mut Vec<InterfaceMethod<'src>>,
         data: &InterfaceData<'src>,
-        id: &OperationId<'src>,
-        op_data: &OperationData<'src>,
+        id: &'src OperationId<'src>,
+        op_data: &'src OperationData<'src>,
         unstable_types: &HashSet<Identifier>,
     ) {
         let attrs = data.definition_attributes;
         let unstable = data.stability.is_unstable();
 
-        for method in self.create_imports(attrs, id, op_data, unstable, unstable_types) {
-            methods.push(method);
+        for method in self.create_imports(
+            Some(type_name),
+            attrs,
+            id,
+            op_data,
+            unstable,
+            unstable_types,
+        ) {
+            if !methods.iter().any(|old_method| {
+                old_method.variadic == method.variadic
+                    && old_method.js_name == method.js_name
+                    && old_method.variadic_type == method.variadic_type
+                    && old_method
+                        .arguments
+                        .iter()
+                        .map(|(_, idl, wb)| (idl.orig(), wb))
+                        .eq(method.arguments.iter().map(|(_, idl, wb)| (idl.orig(), wb)))
+            }) {
+                methods.push(method);
+            }
         }
     }
 
@@ -747,13 +876,21 @@ impl<'src> FirstPassRecord<'src> {
 
                     fields.push(DictionaryField {
                         required: false,
-                        name: rust_ident(&snake_case_ident(identifier)),
+                        name: snake_case_ident(identifier),
                         js_name: identifier.to_string(),
-                        ty: idl_type::IdlType::Callback
-                            .to_syn_type(pos)
+                        ty: idl_type::IdentifierType::Callback
+                            .to_syn_type(pos, false)
                             .unwrap()
                             .unwrap(),
+                        return_ty: optional_return_ty(
+                            idl_type::IdentifierType::Callback
+                                .to_syn_type(TypePosition::Return, false)
+                                .unwrap()
+                                .unwrap(),
+                        ),
+                        is_js_value_ref_option_type: false,
                         unstable: false,
+                        deprecated: get_rust_deprecated(&item.definition.attributes),
                     })
                 }
                 _ => {
@@ -770,6 +907,7 @@ impl<'src> FirstPassRecord<'src> {
             js_name,
             fields,
             unstable: false,
+            deprecated: None,
         }
         .generate(options)
         .to_tokens(&mut program.tokens);
@@ -794,10 +932,10 @@ pub fn generate(from: &Path, to: &Path, options: Options) -> Result<String> {
     let features = parse_webidl(generate_features, source, unstable_source)?;
 
     if to.exists() {
-        fs::remove_dir_all(&to).context("Removing features directory")?;
+        fs::remove_dir_all(to).context("Removing features directory")?;
     }
 
-    fs::create_dir_all(&to).context("Creating features directory")?;
+    fs::create_dir_all(to).context("Creating features directory")?;
 
     for (name, feature) in features.iter() {
         let out_file_path = to.join(format!("gen_{}.rs", name));
@@ -807,17 +945,17 @@ pub fn generate(from: &Path, to: &Path, options: Options) -> Result<String> {
 
     let binding_file = features.keys().map(|name| {
         if generate_features {
-            format!("#[cfg(feature = \"{name}\")] #[allow(non_snake_case)] mod gen_{name};\n#[cfg(feature = \"{name}\")] pub use gen_{name}::*;", name = name)
+            format!("#[cfg(feature = \"{name}\")] #[allow(non_snake_case)] mod gen_{name};\n#[cfg(feature = \"{name}\")] #[allow(unused_imports)] pub use gen_{name}::*;", name = name)
         } else {
-            format!("#[allow(non_snake_case)] mod gen_{name};\npub use gen_{name}::*;", name = name)
+            format!("#[allow(non_snake_case)] mod gen_{name};\n#[allow(unused_imports)] pub use gen_{name}::*;", name = name)
         }
     }).collect::<Vec<_>>().join("\n\n");
 
     fs::write(to.join("mod.rs"), binding_file)?;
 
     let to_format = features
-        .iter()
-        .map(|(name, _)| to.join(format!("gen_{}.rs", name)))
+        .keys()
+        .map(|name| to.join(format!("gen_{}.rs", name)))
         .chain([to.join("mod.rs")]);
 
     rustfmt(to_format)?;
@@ -849,7 +987,7 @@ pub fn generate(from: &Path, to: &Path, options: Options) -> Result<String> {
             if path.extension() != Some(OsStr::new("webidl")) {
                 continue;
             }
-            source = source
+            source
                 .add_file(&path)
                 .with_context(|| format!("reading contents of file \"{}\"", path.display()))?;
         }
@@ -857,16 +995,23 @@ pub fn generate(from: &Path, to: &Path, options: Options) -> Result<String> {
         Ok(source)
     }
 
-    fn rustfmt<'a>(paths: impl IntoIterator<Item = PathBuf>) -> Result<()> {
+    fn rustfmt(paths: impl IntoIterator<Item = PathBuf>) -> Result<()> {
         // run rustfmt on the generated file - really handy for debugging
-        let result = Command::new("rustfmt")
-            .arg("--edition")
-            .arg("2018")
-            .args(paths)
-            .status()
-            .context("rustfmt failed")?;
 
-        assert!(result.success(), "rustfmt failed");
+        // On Windows, the command line length is limited to 32k characters, so
+        // we need to split the command into multiple invocations. I've
+        // arbitrarily chosen to format 400 files at a time, because it works.
+        let paths: Vec<_> = paths.into_iter().collect();
+        for chunk in paths.chunks(400) {
+            let result = Command::new("rustfmt")
+                .arg("--edition")
+                .arg("2021")
+                .args(chunk)
+                .status()
+                .context("rustfmt failed")?;
+
+            assert!(result.success(), "rustfmt failed");
+        }
 
         Ok(())
     }
@@ -897,7 +1042,7 @@ pub fn generate(from: &Path, to: &Path, options: Options) -> Result<String> {
                         return Err(e.context("compiling WebIDL into wasm-bindgen bindings"));
                     }
                 }
-                return Err(e.context("compiling WebIDL into wasm-bindgen bindings"));
+                Err(e.context("compiling WebIDL into wasm-bindgen bindings"))
             }
         }
     }

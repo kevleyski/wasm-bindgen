@@ -14,7 +14,7 @@ impl A {
     }
 
     pub fn foo(&self) {
-        drop(self.x);
+        assert_eq!(self.x, 3);
     }
 }
 
@@ -31,13 +31,14 @@ pub fn foo(x: bool) {
 #[wasm_bindgen]
 extern "C" {
     fn some_import();
+    #[wasm_bindgen(thread_local_v2)]
     static A: JsValue;
 }
 
 #[wasm_bindgen]
 pub fn bar(_: &str) -> JsValue {
     some_import();
-    A.clone()
+    A.with(JsValue::clone)
 }
 
 #[wasm_bindgen]

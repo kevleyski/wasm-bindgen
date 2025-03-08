@@ -1,4 +1,5 @@
 #![allow(unused_imports)]
+#![allow(clippy::all)]
 use super::*;
 use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
@@ -110,7 +111,7 @@ extern "C" {
     # [wasm_bindgen (static_method_of = DomPoint , js_class = "DOMPoint" , js_name = fromPoint)]
     #[doc = "The `fromPoint()` method."]
     #[doc = ""]
-    #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/DOMPoint/fromPoint)"]
+    #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/DOMPoint/fromPoint_static)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `DomPoint`*"]
     pub fn from_point() -> DomPoint;
@@ -118,7 +119,7 @@ extern "C" {
     # [wasm_bindgen (static_method_of = DomPoint , js_class = "DOMPoint" , js_name = fromPoint)]
     #[doc = "The `fromPoint()` method."]
     #[doc = ""]
-    #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/DOMPoint/fromPoint)"]
+    #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/DOMPoint/fromPoint_static)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `DomPoint`, `DomPointInit`*"]
     pub fn from_point_with_other(other: &DomPointInit) -> DomPoint;

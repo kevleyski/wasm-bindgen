@@ -42,14 +42,12 @@ async fn start() -> Result<(), JsValue> {
     console_log!("dc1 created: label {:?}", dc1.label());
 
     let dc1_clone = dc1.clone();
-    let onmessage_callback =
-        Closure::<dyn FnMut(_)>::new(move |ev: MessageEvent| match ev.data().as_string() {
-            Some(message) => {
-                console_warn!("{:?}", message);
-                dc1_clone.send_with_str("Pong from pc1.dc!").unwrap();
-            }
-            None => {}
-        });
+    let onmessage_callback = Closure::<dyn FnMut(_)>::new(move |ev: MessageEvent| {
+        if let Some(message) = ev.data().as_string() {
+            console_warn!("{:?}", message);
+            dc1_clone.send_with_str("Pong from pc1.dc!").unwrap();
+        }
+    });
     dc1.set_onmessage(Some(onmessage_callback.as_ref().unchecked_ref()));
     onmessage_callback.forget();
 
@@ -61,11 +59,11 @@ async fn start() -> Result<(), JsValue> {
         let dc2 = ev.channel();
         console_log!("pc2.ondatachannel!: {:?}", dc2.label());
 
-        let onmessage_callback =
-            Closure::<dyn FnMut(_)>::new(move |ev: MessageEvent| match ev.data().as_string() {
-                Some(message) => console_warn!("{:?}", message),
-                None => {}
-            });
+        let onmessage_callback = Closure::<dyn FnMut(_)>::new(move |ev: MessageEvent| {
+            if let Some(message) = ev.data().as_string() {
+                console_warn!("{:?}", message);
+            }
+        });
         dc2.set_onmessage(Some(onmessage_callback.as_ref().unchecked_ref()));
         onmessage_callback.forget();
 
@@ -85,24 +83,22 @@ async fn start() -> Result<(), JsValue> {
      */
     let pc2_clone = pc2.clone();
     let onicecandidate_callback1 =
-        Closure::<dyn FnMut(_)>::new(move |ev: RtcPeerConnectionIceEvent| match ev.candidate() {
-            Some(candidate) => {
+        Closure::<dyn FnMut(_)>::new(move |ev: RtcPeerConnectionIceEvent| {
+            if let Some(candidate) = ev.candidate() {
                 console_log!("pc1.onicecandidate: {:#?}", candidate.candidate());
                 let _ = pc2_clone.add_ice_candidate_with_opt_rtc_ice_candidate(Some(&candidate));
             }
-            None => {}
         });
     pc1.set_onicecandidate(Some(onicecandidate_callback1.as_ref().unchecked_ref()));
     onicecandidate_callback1.forget();
 
     let pc1_clone = pc1.clone();
     let onicecandidate_callback2 =
-        Closure::<dyn FnMut(_)>::new(move |ev: RtcPeerConnectionIceEvent| match ev.candidate() {
-            Some(candidate) => {
+        Closure::<dyn FnMut(_)>::new(move |ev: RtcPeerConnectionIceEvent| {
+            if let Some(candidate) = ev.candidate() {
                 console_log!("pc2.onicecandidate: {:#?}", candidate.candidate());
                 let _ = pc1_clone.add_ice_candidate_with_opt_rtc_ice_candidate(Some(&candidate));
             }
-            None => {}
         });
     pc2.set_onicecandidate(Some(onicecandidate_callback2.as_ref().unchecked_ref()));
     onicecandidate_callback2.forget();
@@ -117,8 +113,8 @@ async fn start() -> Result<(), JsValue> {
         .unwrap();
     console_log!("pc1: offer {:?}", offer_sdp);
 
-    let mut offer_obj = RtcSessionDescriptionInit::new(RtcSdpType::Offer);
-    offer_obj.sdp(&offer_sdp);
+    let offer_obj = RtcSessionDescriptionInit::new(RtcSdpType::Offer);
+    offer_obj.set_sdp(&offer_sdp);
     let sld_promise = pc1.set_local_description(&offer_obj);
     JsFuture::from(sld_promise).await?;
     console_log!("pc1: state {:?}", pc1.signaling_state());
@@ -128,8 +124,8 @@ async fn start() -> Result<(), JsValue> {
      * Create and send ANSWER from pc2 to pc1
      *
      */
-    let mut offer_obj = RtcSessionDescriptionInit::new(RtcSdpType::Offer);
-    offer_obj.sdp(&offer_sdp);
+    let offer_obj = RtcSessionDescriptionInit::new(RtcSdpType::Offer);
+    offer_obj.set_sdp(&offer_sdp);
     let srd_promise = pc2.set_remote_description(&offer_obj);
     JsFuture::from(srd_promise).await?;
     console_log!("pc2: state {:?}", pc2.signaling_state());
@@ -140,8 +136,8 @@ async fn start() -> Result<(), JsValue> {
         .unwrap();
     console_log!("pc2: answer {:?}", answer_sdp);
 
-    let mut answer_obj = RtcSessionDescriptionInit::new(RtcSdpType::Answer);
-    answer_obj.sdp(&answer_sdp);
+    let answer_obj = RtcSessionDescriptionInit::new(RtcSdpType::Answer);
+    answer_obj.set_sdp(&answer_sdp);
     let sld_promise = pc2.set_local_description(&answer_obj);
     JsFuture::from(sld_promise).await?;
     console_log!("pc2: state {:?}", pc2.signaling_state());
@@ -150,8 +146,8 @@ async fn start() -> Result<(), JsValue> {
      * Receive ANSWER from pc2
      *
      */
-    let mut answer_obj = RtcSessionDescriptionInit::new(RtcSdpType::Answer);
-    answer_obj.sdp(&answer_sdp);
+    let answer_obj = RtcSessionDescriptionInit::new(RtcSdpType::Answer);
+    answer_obj.set_sdp(&answer_sdp);
     let srd_promise = pc1.set_remote_description(&answer_obj);
     JsFuture::from(srd_promise).await?;
     console_log!("pc1: state {:?}", pc1.signaling_state());

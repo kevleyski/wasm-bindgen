@@ -1,4 +1,5 @@
 #![allow(unused_imports)]
+#![allow(clippy::all)]
 use super::*;
 use wasm_bindgen::prelude::*;
 #[cfg(web_sys_unstable_apis)]
@@ -37,7 +38,7 @@ extern "C" {
     #[doc = ""]
     #[doc = "*This API is unstable and requires `--cfg=web_sys_unstable_apis` to be activated, as"]
     #[doc = "[described in the `wasm-bindgen` guide](https://rustwasm.github.io/docs/wasm-bindgen/web-sys/unstable-apis.html)*"]
-    pub fn projection_matrix(this: &XrView) -> Vec<f32>;
+    pub fn projection_matrix(this: &XrView) -> ::alloc::vec::Vec<f32>;
     #[cfg(web_sys_unstable_apis)]
     #[cfg(feature = "XrRigidTransform")]
     # [wasm_bindgen (structural , method , getter , js_class = "XRView" , js_name = transform)]

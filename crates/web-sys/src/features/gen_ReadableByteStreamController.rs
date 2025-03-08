@@ -1,4 +1,5 @@
 #![allow(unused_imports)]
+#![allow(clippy::all)]
 use super::*;
 use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
@@ -52,6 +53,16 @@ extern "C" {
     pub fn enqueue_with_u8_array(
         this: &ReadableByteStreamController,
         chunk: &mut [u8],
+    ) -> Result<(), JsValue>;
+    # [wasm_bindgen (catch , method , structural , js_class = "ReadableByteStreamController" , js_name = enqueue)]
+    #[doc = "The `enqueue()` method."]
+    #[doc = ""]
+    #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/ReadableByteStreamController/enqueue)"]
+    #[doc = ""]
+    #[doc = "*This API requires the following crate features to be activated: `ReadableByteStreamController`*"]
+    pub fn enqueue_with_js_u8_array(
+        this: &ReadableByteStreamController,
+        chunk: &::js_sys::Uint8Array,
     ) -> Result<(), JsValue>;
     # [wasm_bindgen (method , structural , js_class = "ReadableByteStreamController" , js_name = error)]
     #[doc = "The `error()` method."]

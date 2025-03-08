@@ -1,15 +1,19 @@
 use crate::descriptor::VectorKind;
 use crate::wit::{AuxImport, WasmBindgenAux};
 use std::borrow::Cow;
-use std::collections::{HashMap, HashSet};
-use walrus::{FunctionId, ImportId, TypedCustomSectionId};
+use std::collections::{BTreeMap, HashSet};
+use walrus::{FunctionId, ImportId, RefType, TypedCustomSectionId};
 
 #[derive(Default, Debug)]
 pub struct NonstandardWitSection {
     /// A list of adapter functions, keyed by their id.
-    pub adapters: HashMap<AdapterId, Adapter>,
+    ///
+    /// This map is iterated over in multiple places, so we use an ordered map
+    /// to ensure that the order of iteration is deterministic. This map affects
+    /// all parts of the generated code, so it's important to get this right.
+    pub adapters: BTreeMap<AdapterId, Adapter>,
 
-    /// A list of pairs for adapter functions that implement core wasm imports.
+    /// A list of pairs for adapter functions that implement core Wasm imports.
     pub implements: Vec<(ImportId, FunctionId, AdapterId)>,
 
     /// A list of adapter functions and the names they're exported under.
@@ -36,7 +40,6 @@ pub enum AdapterKind {
         instructions: Vec<InstructionData>,
     },
     Import {
-        module: String,
         name: String,
         kind: AdapterJsImportKind,
     },
@@ -71,10 +74,12 @@ pub enum AdapterType {
     S16,
     S32,
     S64,
+    S128,
     U8,
     U16,
     U32,
     U64,
+    U128,
     F32,
     F64,
     String,
@@ -85,17 +90,22 @@ pub enum AdapterType {
     Vector(VectorKind),
     Option(Box<AdapterType>),
     Struct(String),
+    Enum(String),
+    StringEnum(String),
     NamedExternref(String),
     Function,
+    NonNull,
 }
 
 #[derive(Debug, Clone)]
 pub enum Instruction {
     /// Calls a function by its id.
     CallCore(walrus::FunctionId),
-    /// Schedules a function to be called after the whole lift/lower cycle is
-    /// finished, e.g. to deallocate a string or something.
-    DeferCallCore(walrus::FunctionId),
+    /// Call the deallocation function.
+    DeferFree {
+        free: walrus::FunctionId,
+        align: usize,
+    },
     /// A call to one of our own defined adapters, similar to the standard
     /// call-adapter instruction
     CallAdapter(AdapterId),
@@ -125,15 +135,52 @@ pub enum Instruction {
         size: u32,
     },
 
-    /// Pops a typed integer (`u8`, `s16`, etc.) and pushes a plain wasm `i32` or `i64` equivalent.
-    IntToWasm {
-        input: AdapterType,
-        output: walrus::ValType,
+    /// Pops a 32/16/8-bit integer (`u8`, `s16`, etc.) and pushes a Wasm `i32`.
+    Int32ToWasm,
+    /// Pops a Wasm `i32` and pushes a 32-bit integer.
+    WasmToInt32 {
+        /// Whether the integer represents an unsigned 32-bit value.
+        unsigned_32: bool,
     },
-    /// Pops a wasm `i32` or `i64` and pushes a typed integer (`u8`, `s16`, etc.) equivalent.
-    WasmToInt {
-        input: walrus::ValType,
-        output: AdapterType,
+
+    /// Pops a 64-bit integer and pushes a Wasm `i64`.
+    Int64ToWasm,
+    /// Pops a Wasm `i64` and pushes a 64-bit integer.
+    WasmToInt64 {
+        unsigned: bool,
+    },
+
+    /// Pops a 128-bit integer and pushes 2 Wasm 64-bit ints.
+    Int128ToWasm,
+    /// Pops 2 Wasm 64-bit ints and pushes a 128-bit integer.
+    WasmToInt128 {
+        signed: bool,
+    },
+
+    OptionInt128ToWasm,
+    OptionWasmToInt128 {
+        signed: bool,
+    },
+
+    /// Pops a Wasm `i32` and pushes the enum variant as a string
+    WasmToStringEnum {
+        name: String,
+    },
+
+    OptionWasmToStringEnum {
+        name: String,
+    },
+
+    /// pops a string and pushes the enum variant as an `i32`
+    StringEnumToWasm {
+        name: String,
+        invalid: u32,
+    },
+
+    OptionStringEnumToWasm {
+        name: String,
+        invalid: u32,
+        hole: u32,
     },
 
     /// Pops a `bool` from the stack and pushes an `i32` equivalent
@@ -143,7 +190,7 @@ pub enum Instruction {
     /// Pops an `externref` from the stack, allocates space in the externref table,
     /// returns the index it was stored at.
     I32FromExternrefOwned,
-    /// Pops an `externref` from the stack, pushes it onto the externref wasm table
+    /// Pops an `externref` from the stack, pushes it onto the externref Wasm table
     /// stack, and returns the index it was stored at.
     I32FromExternrefBorrow,
     /// Pops an `externref` from the stack, assumes it's a Rust class given, and
@@ -163,7 +210,7 @@ pub enum Instruction {
         class: String,
     },
     /// Pops an `externref` from the stack, pushes either 0 if it's "none" or and
-    /// index into the owned wasm table it was stored at if it's "some"
+    /// index into the owned Wasm table it was stored at if it's "some"
     I32FromOptionExternref {
         /// Set to `Some` by the externref pass of where to put it in the wasm
         /// module, otherwise it's shoved into the JS shim.
@@ -183,6 +230,14 @@ pub enum Instruction {
     I32FromOptionEnum {
         hole: u32,
     },
+    /// Pops an `externref` from the stack, pushes either a sentinel value if it's
+    /// "none" or the integer value of it if it's "some"
+    F64FromOptionSentinelInt {
+        signed: bool,
+    },
+    /// Pops an `externref` from the stack, pushes either a sentinel value if it's
+    /// "none" or the f32 value of it if it's "some"
+    F64FromOptionSentinelF32,
     /// Pops any externref from the stack and then pushes two values. First is a
     /// 0/1 if it's none/some and second is `ty` value if it was there or 0 if
     /// it wasn't there.
@@ -257,7 +312,6 @@ pub enum Instruction {
     /// pops ptr/length i32, loads string from cache
     CachedStringLoad {
         owned: bool,
-        optional: bool,
         mem: walrus::MemoryId,
         free: walrus::FunctionId,
         /// If we're in reference-types mode, the externref table ID to get the cached string from.
@@ -293,6 +347,8 @@ pub enum Instruction {
         kind: VectorKind,
         mem: walrus::MemoryId,
     },
+    /// pops f64, pushes it viewed as an optional value with a known sentinel
+    OptionF64Sentinel,
     /// pops i32, pushes it viewed as an optional value with a known sentinel
     OptionU32Sentinel,
     /// pops an i32, then `ty`, then pushes externref
@@ -305,6 +361,9 @@ pub enum Instruction {
     OptionEnumFromI32 {
         hole: u32,
     },
+    I32FromOptionNonNull,
+    OptionNonNullFromI32,
+    I32FromNonNull,
 }
 
 impl AdapterType {
@@ -314,8 +373,8 @@ impl AdapterType {
             walrus::ValType::I64 => AdapterType::I64,
             walrus::ValType::F32 => AdapterType::F32,
             walrus::ValType::F64 => AdapterType::F64,
-            walrus::ValType::Externref => AdapterType::Externref,
-            walrus::ValType::Funcref | walrus::ValType::V128 => return None,
+            walrus::ValType::Ref(RefType::Externref) => AdapterType::Externref,
+            walrus::ValType::Ref(_) | walrus::ValType::V128 => return None,
         })
     }
 
@@ -325,7 +384,10 @@ impl AdapterType {
             AdapterType::I64 => walrus::ValType::I64,
             AdapterType::F32 => walrus::ValType::F32,
             AdapterType::F64 => walrus::ValType::F64,
-            AdapterType::Externref | AdapterType::NamedExternref(_) => walrus::ValType::Externref,
+            AdapterType::Enum(_) => walrus::ValType::I32,
+            AdapterType::Externref | AdapterType::NamedExternref(_) => {
+                walrus::ValType::Ref(RefType::Externref)
+            }
             _ => return None,
         })
     }
@@ -354,7 +416,7 @@ impl NonstandardWitSection {
                 kind,
             },
         );
-        return id;
+        id
     }
 
     /// Removes any dead entries in `adapters` that are no longer necessary
@@ -423,7 +485,7 @@ impl walrus::CustomSection for NonstandardWitSection {
             };
             for instr in instrs {
                 match instr.instr {
-                    DeferCallCore(f) | CallCore(f) => {
+                    DeferFree { free: f, .. } | CallCore(f) => {
                         roots.push_func(f);
                     }
                     StoreRetptr { mem, .. }
@@ -463,11 +525,11 @@ impl walrus::CustomSection for NonstandardWitSection {
                             roots.push_func(id);
                         }
                     }
-                    I32FromOptionExternref { table_and_alloc } => {
-                        if let Some((table, alloc)) = table_and_alloc {
-                            roots.push_table(table);
-                            roots.push_func(alloc);
-                        }
+                    I32FromOptionExternref {
+                        table_and_alloc: Some((table, alloc)),
+                    } => {
+                        roots.push_table(table);
+                        roots.push_func(alloc);
                     }
                     UnwrapResult { table_and_drop } | UnwrapResultString { table_and_drop } => {
                         if let Some((table, drop)) = table_and_drop {

@@ -5,7 +5,8 @@ use crate::wit::{AdapterKind, Instruction, NonstandardWitSection};
 use crate::wit::{AdapterType, InstructionData, StackChange, WasmBindgenAux};
 use anyhow::Result;
 use std::collections::HashMap;
-use walrus::{ir::Value, ElementKind, InitExpr, Module};
+use walrus::ElementItems;
+use walrus::{ir::Value, ConstExpr, ElementKind, Module};
 use wasm_bindgen_externref_xform::Context;
 
 pub fn process(module: &mut Module) -> Result<()> {
@@ -25,12 +26,12 @@ pub fn process(module: &mut Module) -> Result<()> {
 
     // Transform all exported functions in the module, using the bindings listed
     // for each exported function.
-    for (id, adapter) in section.adapters.iter_mut() {
+    for (id, adapter) in &mut section.adapters {
         let instructions = match &mut adapter.kind {
             AdapterKind::Local { instructions } => instructions,
             AdapterKind::Import { .. } => continue,
         };
-        if let Some(id) = implements.get(&id) {
+        if let Some(id) = implements.get(id) {
             import_xform(
                 &mut cfg,
                 *id,
@@ -77,7 +78,7 @@ pub fn process(module: &mut Module) -> Result<()> {
     // Additionally we may need to update some adapter instructions other than
     // those found for the externref pass. These are some general "fringe support"
     // things necessary to get absolutely everything working.
-    for (_, adapter) in section.adapters.iter_mut() {
+    for adapter in &mut section.adapters.values_mut() {
         let instrs = match &mut adapter.kind {
             AdapterKind::Local { instructions } => instructions,
             AdapterKind::Import { .. } => continue,
@@ -85,7 +86,7 @@ pub fn process(module: &mut Module) -> Result<()> {
         for instr in instrs {
             match instr.instr {
                 // Calls to the heap live count intrinsic are now routed to the
-                // actual wasm function which keeps track of this.
+                // actual Wasm function which keeps track of this.
                 Instruction::CallAdapter(adapter) => {
                     let id = match meta.live_count {
                         Some(id) => id,
@@ -102,7 +103,7 @@ pub fn process(module: &mut Module) -> Result<()> {
                     instr.instr = Instruction::CallCore(id);
                 }
 
-                // Optional externref values are now managed in the wasm module, so
+                // Optional externref values are now managed in the Wasm module, so
                 // we need to store where they're managed.
                 Instruction::I32FromOptionExternref {
                     ref mut table_and_alloc,
@@ -136,7 +137,7 @@ fn find_call_export(instrs: &[InstructionData]) -> Option<Export> {
     instrs
         .iter()
         .enumerate()
-        .filter_map(|(i, instr)| match instr.instr {
+        .find_map(|(i, instr)| match instr.instr {
             Instruction::CallExport(e) => Some(Export::Export(e)),
             Instruction::CallTableElement(e) => Some(Export::TableElement {
                 idx: e,
@@ -144,7 +145,6 @@ fn find_call_export(instrs: &[InstructionData]) -> Option<Export> {
             }),
             _ => None,
         })
-        .next()
 }
 
 enum Export {
@@ -178,14 +178,11 @@ fn import_xform(
     let mut to_delete = Vec::new();
     let mut iter = instrs.iter().enumerate();
     let mut args = Vec::new();
-    while let Some((i, instr)) = iter.next() {
+    for (i, instr) in iter.by_ref() {
         match instr.instr {
             Instruction::CallAdapter(_) => break,
             Instruction::ExternrefLoadOwned { .. } | Instruction::TableGet => {
-                let owned = match instr.instr {
-                    Instruction::TableGet => false,
-                    _ => true,
-                };
+                let owned = !matches!(instr.instr, Instruction::TableGet);
                 let mut arg: Arg = match args.pop().unwrap() {
                     Some(arg) => arg,
                     None => panic!("previous instruction must be `arg.get`"),
@@ -222,19 +219,13 @@ fn import_xform(
     }
 
     let mut ret_externref = false;
-    while let Some((i, instr)) = iter.next() {
-        match instr.instr {
-            Instruction::I32FromExternrefOwned => {
-                assert_eq!(results.len(), 1);
-                match results[0] {
-                    AdapterType::I32 => {}
-                    _ => panic!("must be `i32` type"),
-                }
-                results[0] = AdapterType::Externref;
-                ret_externref = true;
-                to_delete.push(i);
-            }
-            _ => {}
+    for (i, instr) in iter {
+        if matches!(instr.instr, Instruction::I32FromExternrefOwned) {
+            assert_eq!(results.len(), 1);
+            assert!(matches!(results[0], AdapterType::I32), "must be `i32` type");
+            results[0] = AdapterType::Externref;
+            ret_externref = true;
+            to_delete.push(i);
         }
     }
 
@@ -274,7 +265,7 @@ fn export_xform(cx: &mut Context, export: Export, instrs: &mut Vec<InstructionDa
     //
     // Note that we're going to delete the `I32FromExternref*` instructions, so we
     // also maintain indices of the instructions to delete.
-    while let Some((i, instr)) = iter.next() {
+    for (i, instr) in iter.by_ref() {
         match instr.instr {
             Instruction::CallExport(_) | Instruction::CallTableElement(_) => break,
             Instruction::I32FromExternrefOwned => {
@@ -309,7 +300,7 @@ fn export_xform(cx: &mut Context, export: Export, instrs: &mut Vec<InstructionDa
     // so we don't need to handle that possibility.
     let mut uses_retptr = false;
     let mut ret_externref = false;
-    while let Some((i, instr)) = iter.next() {
+    for (i, instr) in iter {
         match instr.instr {
             Instruction::LoadRetptr { .. } => uses_retptr = true,
             Instruction::ExternrefLoadOwned { .. } if !uses_retptr => {
@@ -342,7 +333,7 @@ fn export_xform(cx: &mut Context, export: Export, instrs: &mut Vec<InstructionDa
     }
 
     // Delete all unnecessary externref management instructions. We're going to
-    // sink these instructions into the wasm module itself.
+    // sink these instructions into the Wasm module itself.
     for idx in to_delete.into_iter().rev() {
         instrs.remove(idx);
     }
@@ -353,8 +344,8 @@ fn module_needs_externref_metadata(aux: &WasmBindgenAux, section: &NonstandardWi
     use Instruction::*;
 
     // our `handleError` intrinsic uses a few pieces of metadata to store
-    // indices directly into the wasm module.
-    if aux.imports_with_catch.len() > 0 {
+    // indices directly into the Wasm module.
+    if !aux.imports_with_catch.is_empty() {
         return true;
     }
 
@@ -366,41 +357,37 @@ fn module_needs_externref_metadata(aux: &WasmBindgenAux, section: &NonstandardWi
             AdapterKind::Local { instructions } => instructions,
             AdapterKind::Import { .. } => return false,
         };
-        instructions.iter().any(|instr| match instr.instr {
-            VectorToMemory {
-                kind: VectorKind::Externref | VectorKind::NamedExternref(_),
-                ..
-            }
-            | MutableSliceToMemory {
-                kind: VectorKind::Externref | VectorKind::NamedExternref(_),
-                ..
-            }
-            | OptionVector {
-                kind: VectorKind::Externref | VectorKind::NamedExternref(_),
-                ..
-            }
-            | VectorLoad {
-                kind: VectorKind::Externref | VectorKind::NamedExternref(_),
-                ..
-            }
-            | OptionVectorLoad {
-                kind: VectorKind::Externref | VectorKind::NamedExternref(_),
-                ..
-            }
-            | View {
-                kind: VectorKind::Externref | VectorKind::NamedExternref(_),
-                ..
-            }
-            | OptionView {
-                kind: VectorKind::Externref | VectorKind::NamedExternref(_),
-                ..
-            } => true,
-            _ => false,
+        instructions.iter().any(|instr| {
+            matches!(
+                instr.instr,
+                VectorToMemory {
+                    kind: VectorKind::Externref | VectorKind::NamedExternref(_),
+                    ..
+                } | MutableSliceToMemory {
+                    kind: VectorKind::Externref | VectorKind::NamedExternref(_),
+                    ..
+                } | OptionVector {
+                    kind: VectorKind::Externref | VectorKind::NamedExternref(_),
+                    ..
+                } | VectorLoad {
+                    kind: VectorKind::Externref | VectorKind::NamedExternref(_),
+                    ..
+                } | OptionVectorLoad {
+                    kind: VectorKind::Externref | VectorKind::NamedExternref(_),
+                    ..
+                } | View {
+                    kind: VectorKind::Externref | VectorKind::NamedExternref(_),
+                    ..
+                } | OptionView {
+                    kind: VectorKind::Externref | VectorKind::NamedExternref(_),
+                    ..
+                }
+            )
         })
     })
 }
 
-/// In MVP wasm all element segments must be contiguous lists of function
+/// In MVP Wasm all element segments must be contiguous lists of function
 /// indices. Post-MVP with reference types element segments can have holes.
 /// While `walrus` will select the encoding that fits, this function forces the
 /// listing of segments to be MVP-compatible.
@@ -411,11 +398,22 @@ pub fn force_contiguous_elements(module: &mut Module) -> Result<()> {
     // Here we take a look at all element segments in the module to see if we
     // need to split them.
     for segment in module.elements.iter_mut() {
-        // If this segment has all-`Some` members then it's already contiguous
-        // and we can skip it.
-        if segment.members.iter().all(|m| m.is_some()) {
-            continue;
-        }
+        let (ty, items) = match &mut segment.items {
+            ElementItems::Expressions(ty, items) => {
+                // If this segment has no null reference members then it's already
+                // contiguous and we can skip it.
+                if items
+                    .iter()
+                    .all(|item| !matches!(item, ConstExpr::RefNull(_)))
+                {
+                    continue;
+                }
+
+                (*ty, items)
+            }
+            // Function index segments don't have holes.
+            ElementItems::Functions(_) => continue,
+        };
 
         // For now active segments are all we're interested in since
         // passive/declared have no hope of being MVP-compatible anyway.
@@ -424,7 +422,7 @@ pub fn force_contiguous_elements(module: &mut Module) -> Result<()> {
         let (table, offset) = match &segment.kind {
             ElementKind::Active {
                 table,
-                offset: InitExpr::Value(Value::I32(n)),
+                offset: ConstExpr::Value(Value::I32(n)),
             } => (*table, *n),
             _ => continue,
         };
@@ -439,16 +437,13 @@ pub fn force_contiguous_elements(module: &mut Module) -> Result<()> {
         // offset.
         let mut commit = |last_idx: usize, block: Vec<_>| {
             let new_offset = offset + (last_idx - block.len()) as i32;
-            let new_offset = InitExpr::Value(Value::I32(new_offset));
-            new_segments.push((table, new_offset, segment.ty, block));
+            let new_offset = ConstExpr::Value(Value::I32(new_offset));
+            new_segments.push((table, new_offset, ty, block));
         };
-        for (i, id) in segment.members.iter().enumerate() {
-            match id {
-                // If we find a function, then we either start a new block or
-                // push it onto the existing block.
-                Some(id) => block.get_or_insert(Vec::new()).push(Some(*id)),
-                None => {
-                    let block = match block.take() {
+        for (i, expr) in items.iter().enumerate() {
+            match expr {
+                ConstExpr::RefNull(_) => {
+                    let block: Vec<_> = match block.take() {
                         Some(b) => b,
                         None => continue,
                     };
@@ -463,21 +458,25 @@ pub fn force_contiguous_elements(module: &mut Module) -> Result<()> {
                         commit(i, block);
                     }
                 }
+                // If we find a function, then we either start a new block or
+                // push it onto the existing block.
+                _ => block.get_or_insert(Vec::new()).push(*expr),
             }
         }
 
         // If there's no trailing empty slots then we commit the last block onto
         // the new segment list.
         if let Some(block) = block {
-            commit(segment.members.len(), block);
+            commit(items.len(), block);
         }
-        segment.members.truncate(truncate);
+        items.truncate(truncate);
     }
 
     for (table, offset, ty, members) in new_segments {
-        let id = module
-            .elements
-            .add(ElementKind::Active { table, offset }, ty, members);
+        let id = module.elements.add(
+            ElementKind::Active { table, offset },
+            ElementItems::Expressions(ty, members),
+        );
         module.tables.get_mut(table).elem_segments.insert(id);
     }
     Ok(())

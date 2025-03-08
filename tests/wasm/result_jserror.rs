@@ -45,7 +45,7 @@ call_test!(test_ok, call_ok);
 
 #[wasm_bindgen]
 pub fn make_an_error() -> JsError {
-    JsError::new("un-thrown error").into()
+    JsError::new("un-thrown error")
 }
 call_test!(test_make_an_error, call_make_an_error);
 
@@ -60,7 +60,7 @@ struct ResetOnDrop<'a> {
     flag: &'a mut bool,
 }
 
-impl<'a> Drop for ResetOnDrop<'a> {
+impl Drop for ResetOnDrop<'_> {
     fn drop(&mut self) {
         *self.flag = false;
     }

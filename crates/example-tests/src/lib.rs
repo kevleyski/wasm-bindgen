@@ -8,6 +8,10 @@ use std::{env, str};
 
 use anyhow::{bail, Context};
 use futures_util::{future, SinkExt, StreamExt};
+use http::{HeaderName, HeaderValue, Response};
+use hyper_util::rt::{TokioExecutor, TokioIo};
+use hyper_util::server::conn::auto::Builder;
+use hyper_util::service::TowerToHyperService;
 use mozprofile::profile::Profile;
 use mozrunner::firefox_default_path;
 use mozrunner::runner::{FirefoxProcess, FirefoxRunner, Runner, RunnerProcess};
@@ -19,7 +23,8 @@ use tokio::sync::oneshot;
 use tokio::time::timeout;
 use tokio_tungstenite::tungstenite::{self, Message};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
-use tower::make::Shared;
+use tower::ServiceBuilder;
+use tower_http::services::fs::ServeFileSystemResponseBody;
 use tower_http::services::ServeDir;
 
 /// A command sent from the client to the server.
@@ -143,7 +148,7 @@ impl WebDriver {
         // For the moment, we're only supporting Firefox here.
         let mut builder = FirefoxRunner::new(
             &firefox_default_path().context("failed to find Firefox installation")?,
-            Some(Profile::new()?),
+            Some(Profile::new(None)?),
         );
         builder
             .arg("--remote-debugging-port")
@@ -198,7 +203,7 @@ impl WebDriver {
         self.next_id += 1;
         let json = serde_json::to_string(&BidiCommand { id, method, params })
             .context("failed to serialize message")?;
-        self.ws.send(Message::Text(json)).await?;
+        self.ws.send(Message::Text(json.into())).await?;
         loop {
             let msg = self
                 .ws
@@ -206,7 +211,7 @@ impl WebDriver {
                 .await
                 .unwrap_or(Err(tungstenite::Error::AlreadyClosed))?;
 
-            let message: BidiMessage<R> = serde_json::from_str(&msg.into_text()?)?;
+            let message: BidiMessage<R> = serde_json::from_str(msg.to_text()?)?;
             match message {
                 BidiMessage::CommandResponse {
                     id: response_id,
@@ -226,21 +231,86 @@ impl WebDriver {
         if let Some(event) = self.events.pop_front() {
             Ok(event)
         } else {
-            loop {
-                let msg = self
-                    .ws
-                    .next()
-                    .await
-                    .unwrap_or(Err(tungstenite::Error::AlreadyClosed))?;
+            let msg = self
+                .ws
+                .next()
+                .await
+                .unwrap_or(Err(tungstenite::Error::AlreadyClosed))?;
 
-                let message: BidiMessage<Value> = serde_json::from_str(&msg.into_text()?)?;
-                match message {
-                    BidiMessage::CommandResponse { .. } => bail!("unexpected command response"),
-                    BidiMessage::Event(event) => return Ok(event),
-                }
+            let message: BidiMessage<Value> = serde_json::from_str(msg.to_text()?)?;
+            match message {
+                BidiMessage::CommandResponse { .. } => bail!("unexpected command response"),
+                BidiMessage::Event(event) => Ok(event),
             }
         }
     }
+}
+
+/// Handles a `log.entryAdded` event with the given parameters, and returns an
+/// error if the log entry is an error (or something else goes wrong).
+fn handle_log_event(params: Value) -> anyhow::Result<()> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct LogEntry {
+        level: LogLevel,
+        text: Option<String>,
+        stack_trace: Option<StackTrace>,
+    }
+
+    #[derive(Deserialize, Debug, PartialEq, Eq, Clone, Copy)]
+    #[serde(rename_all = "lowercase")]
+    enum LogLevel {
+        Debug,
+        Info,
+        Warn,
+        Error,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct StackTrace {
+        call_frames: Vec<StackFrame>,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct StackFrame {
+        column_number: i64,
+        function_name: String,
+        line_number: i64,
+        url: String,
+    }
+
+    impl Display for StackFrame {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+            write!(
+                f,
+                "{} (at {}:{}:{})",
+                self.function_name, self.url, self.line_number, self.column_number
+            )
+        }
+    }
+
+    let entry: LogEntry = serde_json::from_value(params).context("invalid log entry received")?;
+
+    if entry.level == LogLevel::Error {
+        if let Some(text) = entry.text {
+            let mut msg = format!("An error occurred: {text}");
+
+            if let Some(stack_trace) = entry.stack_trace {
+                write!(msg, "\n\nStack trace:").unwrap();
+                for frame in stack_trace.call_frames {
+                    write!(msg, "\n{frame}").unwrap();
+                }
+            }
+
+            bail!("{msg}")
+        } else {
+            bail!("An error occurred")
+        }
+    }
+
+    Ok(())
 }
 
 /// Run a single example with the passed name, using the passed closure to
@@ -258,17 +328,47 @@ pub async fn test_example(
     let mut driver = WebDriver::new().await?;
 
     // Serve the path.
-    let server = hyper::Server::try_bind(&"127.0.0.1:0".parse().unwrap())?
-        .serve(Shared::new(ServeDir::new(path)));
+    let service = TowerToHyperService::new(
+        ServiceBuilder::new()
+            .map_response(|mut response: Response<ServeFileSystemResponseBody>| {
+                response.headers_mut().insert(
+                    HeaderName::from_static("cross-origin-opener-policy"),
+                    HeaderValue::from_static("same-origin"),
+                );
+                response.headers_mut().insert(
+                    HeaderName::from_static("cross-origin-embedder-policy"),
+                    HeaderValue::from_static("require-corp"),
+                );
+                response
+            })
+            .service(ServeDir::new(path)),
+    );
 
-    let addr = server.local_addr();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+    let builder = Builder::new(TokioExecutor::new()).http1_only();
 
     let (tx, rx) = oneshot::channel();
 
     let (server_result, result) = future::join(
-        server.with_graceful_shutdown(async move {
-            let _ = rx.await;
-        }),
+        async move {
+            let (stream, _) = listener.accept().await?;
+
+            let conn = builder.serve_connection(TokioIo::new(stream), &service);
+            tokio::pin!(conn);
+
+            let ret = tokio::select! {
+                res = conn.as_mut() => {
+                    res.map_err(|e| anyhow::Error::msg(e.to_string()))
+                }
+                _ = rx => {
+                    Ok(())
+                }
+            };
+
+            conn.graceful_shutdown();
+            ret
+        },
         async {
             #[derive(Deserialize)]
             struct BrowsingContextCreateResult {
@@ -283,13 +383,18 @@ pub async fn test_example(
                 .issue_cmd(
                     "session.subscribe",
                     json!({
-                        "events": ["log.entryAdded"],
+                        "events": ["log.entryAdded", "network.responseCompleted"],
                         "contexts": [&context],
                     }),
                 )
                 .await?;
 
-            let _: Value = driver
+            #[derive(Deserialize)]
+            struct BrowsingContextNavigateResult {
+                navigation: Option<String>,
+            }
+
+            let BrowsingContextNavigateResult { navigation } = driver
                 .issue_cmd(
                     "browsingContext.navigate",
                     json!({
@@ -298,6 +403,51 @@ pub async fn test_example(
                     }),
                 )
                 .await?;
+            // Apparently this being null means that 'the navigation [was] canceled before
+            // making progress'.
+            // source: https://w3c.github.io/webdriver-bidi/#module-browsingContext
+            let navigation = navigation.context("navigation canceled")?;
+
+            // Wait for the page to be fetched, so that we can check whether it succeeds.
+            // Note: I'm pretty sure that `browsingContext.navigate` is supposed to report
+            // an error anyway if this fails, but Firefox seems to be behind the spec here.
+            loop {
+                let event = driver
+                    .next_event()
+                    .await
+                    .context("websocket unexpectedly closed")?;
+                match event.method.as_str() {
+                    "log.entryAdded" => handle_log_event(event.params)?,
+                    "network.responseCompleted" => {
+                        #[derive(Deserialize)]
+                        struct NetworkResponseCompletedParameters {
+                            navigation: Option<String>,
+                            response: NetworkResponseData,
+                        }
+
+                        #[derive(Deserialize)]
+                        #[serde(rename_all = "camelCase")]
+                        struct NetworkResponseData {
+                            status: u64,
+                            status_text: String,
+                        }
+
+                        let params: NetworkResponseCompletedParameters =
+                            serde_json::from_value(event.params)?;
+                        if params.navigation.as_ref() == Some(&navigation) {
+                            if !(200..300).contains(&params.response.status) {
+                                bail!(
+                                    "fetching page failed ({} {})",
+                                    params.response.status,
+                                    params.response.status_text
+                                )
+                            }
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
 
             let start = Instant::now();
             // Wait 5 seconds for any errors to occur.
@@ -307,73 +457,7 @@ pub async fn test_example(
                     Ok(event) => {
                         let event = event?;
                         if event.method == "log.entryAdded" {
-                            #[derive(Deserialize)]
-                            #[serde(rename_all = "camelCase")]
-                            struct LogEntry {
-                                level: LogLevel,
-                                // source: Source,
-                                text: Option<String>,
-                                // timestamp: i64,
-                                stack_trace: Option<StackTrace>,
-                                // kind: LogEntryKind,
-                            }
-
-                            #[derive(Deserialize, Debug, PartialEq, Eq, Clone, Copy)]
-                            #[serde(rename_all = "lowercase")]
-                            enum LogLevel {
-                                Debug,
-                                Info,
-                                Warning,
-                                Error,
-                            }
-
-                            #[derive(Deserialize)]
-                            #[serde(rename_all = "camelCase")]
-                            struct StackTrace {
-                                call_frames: Vec<StackFrame>,
-                            }
-
-                            #[derive(Deserialize)]
-                            #[serde(rename_all = "camelCase")]
-                            struct StackFrame {
-                                column_number: i64,
-                                function_name: String,
-                                line_number: i64,
-                                url: String,
-                            }
-
-                            impl Display for StackFrame {
-                                fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-                                    write!(
-                                        f,
-                                        "{} (at {}:{}:{})",
-                                        self.function_name,
-                                        self.url,
-                                        self.line_number,
-                                        self.column_number
-                                    )
-                                }
-                            }
-
-                            let entry: LogEntry = serde_json::from_value(event.params)
-                                .context("invalid log entry received")?;
-
-                            if entry.level == LogLevel::Error {
-                                if let Some(text) = entry.text {
-                                    let mut msg = format!("An error occurred: {text}");
-
-                                    if let Some(stack_trace) = entry.stack_trace {
-                                        write!(msg, "\n\nStack trace:").unwrap();
-                                        for frame in stack_trace.call_frames {
-                                            write!(msg, "\n{frame}").unwrap();
-                                        }
-                                    }
-
-                                    bail!("{msg}")
-                                } else {
-                                    bail!("An error occurred")
-                                }
-                            }
+                            handle_log_event(event.params)?;
                         }
                     }
                     Err(_) => break,

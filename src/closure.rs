@@ -4,9 +4,12 @@
 //! closures" from Rust to JS. Some more details can be found on the `Closure`
 //! type itself.
 
-use std::fmt;
-use std::mem::{self, ManuallyDrop};
-use std::prelude::v1::*;
+#![allow(clippy::fn_to_numeric_cast)]
+
+use alloc::boxed::Box;
+use alloc::string::String;
+use core::fmt;
+use core::mem::{self, ManuallyDrop};
 
 use crate::convert::*;
 use crate::describe::*;
@@ -328,14 +331,16 @@ where
         // See crates/cli-support/src/js/closures.rs for a more information
         // about what's going on here.
 
+        #[cfg_attr(wasm_bindgen_unstable_test_coverage, coverage(off))]
         extern "C" fn describe<T: WasmClosure + ?Sized>() {
             inform(CLOSURE);
             T::describe()
         }
 
         #[inline(never)]
+        #[cfg_attr(wasm_bindgen_unstable_test_coverage, coverage(off))]
         unsafe fn breaks_if_inlined<T: WasmClosure + ?Sized>(a: usize, b: usize) -> u32 {
-            super::__wbindgen_describe_closure(a as u32, b as u32, describe::<T> as u32)
+            super::__wbindgen_describe_closure(a as u32, b as u32, describe::<T> as usize as u32)
         }
 
         let idx = unsafe { breaks_if_inlined::<T>(a, b) };
@@ -355,15 +360,11 @@ where
     /// to drop this `Closure` while keeping the associated JS function still
     /// valid.
     ///
-    /// By default this function will leak memory. This can be dangerous if this
-    /// function is called many times in an application because the memory leak
-    /// will overwhelm the page quickly and crash the wasm.
-    ///
-    /// If the browser, however, supports weak references, then this function
-    /// will not leak memory. Instead the Rust memory will be reclaimed when the
-    /// JS closure is GC'd. Weak references are not enabled by default since
-    /// they're still a proposal for the JS standard. They can be enabled with
-    /// `WASM_BINDGEN_WEAKREF=1` when running `wasm-bindgen`, however.
+    /// If the platform supports weak references, the Rust memory will be
+    /// reclaimed when the JS closure is GC'd. If weak references is not
+    /// supported, this can be dangerous if this function is called many times
+    /// in an application because the memory leak will overwhelm the page
+    /// quickly and crash the wasm.
     pub fn into_js_value(self) -> JsValue {
         let idx = self.js.idx;
         mem::forget(self);
@@ -463,13 +464,14 @@ impl<T> WasmDescribe for Closure<T>
 where
     T: WasmClosure + ?Sized,
 {
+    #[cfg_attr(wasm_bindgen_unstable_test_coverage, coverage(off))]
     fn describe() {
         inform(EXTERNREF);
     }
 }
 
 // `Closure` can only be passed by reference to imports.
-impl<'a, T> IntoWasmAbi for &'a Closure<T>
+impl<T> IntoWasmAbi for &Closure<T>
 where
     T: WasmClosure + ?Sized,
 {
@@ -480,7 +482,7 @@ where
     }
 }
 
-impl<'a, T> OptionIntoWasmAbi for &'a Closure<T>
+impl<T> OptionIntoWasmAbi for &Closure<T>
 where
     T: WasmClosure + ?Sized,
 {
@@ -557,19 +559,27 @@ pub trait IntoWasmClosure<T: ?Sized> {
 
 macro_rules! doit {
     ($(
-        ($($var:ident)*)
+        ($($var:ident $arg1:ident $arg2:ident $arg3:ident $arg4:ident)*)
     )*) => ($(
+        #[allow(coherence_leak_check)]
         unsafe impl<$($var,)* R> WasmClosure for dyn Fn($($var),*) -> R + 'static
             where $($var: FromWasmAbi + 'static,)*
                   R: ReturnWasmAbi + 'static,
         {
+            #[cfg_attr(wasm_bindgen_unstable_test_coverage, coverage(off))]
             fn describe() {
                 #[allow(non_snake_case)]
+                #[cfg_attr(wasm_bindgen_unstable_test_coverage, coverage(off))]
                 unsafe extern "C" fn invoke<$($var: FromWasmAbi,)* R: ReturnWasmAbi>(
                     a: usize,
                     b: usize,
-                    $($var: <$var as FromWasmAbi>::Abi),*
-                ) -> <R as ReturnWasmAbi>::Abi {
+                    $(
+                    $arg1: <$var::Abi as WasmAbi>::Prim1,
+                    $arg2: <$var::Abi as WasmAbi>::Prim2,
+                    $arg3: <$var::Abi as WasmAbi>::Prim3,
+                    $arg4: <$var::Abi as WasmAbi>::Prim4,
+                    )*
+                ) -> WasmRet<R::Abi> {
                     if a == 0 {
                         throw_str("closure invoked after being dropped");
                     }
@@ -580,14 +590,14 @@ macro_rules! doit {
                         let f: *const dyn Fn($($var),*) -> R =
                             FatPtr { fields: (a, b) }.ptr;
                         $(
-                            let $var = <$var as FromWasmAbi>::from_abi($var);
+                            let $var = <$var as FromWasmAbi>::from_abi($var::Abi::join($arg1, $arg2, $arg3, $arg4));
                         )*
                         (*f)($($var),*)
                     };
-                    ret.return_abi()
+                    ret.return_abi().into()
                 }
 
-                inform(invoke::<$($var,)* R> as u32);
+                inform(invoke::<$($var,)* R> as usize as u32);
 
                 unsafe extern fn destroy<$($var: FromWasmAbi,)* R: ReturnWasmAbi>(
                     a: usize,
@@ -605,23 +615,31 @@ macro_rules! doit {
                         fields: (a, b)
                     }.ptr));
                 }
-                inform(destroy::<$($var,)* R> as u32);
+                inform(destroy::<$($var,)* R> as usize as u32);
 
                 <&Self>::describe();
             }
         }
 
+        #[allow(coherence_leak_check)]
         unsafe impl<$($var,)* R> WasmClosure for dyn FnMut($($var),*) -> R + 'static
             where $($var: FromWasmAbi + 'static,)*
                   R: ReturnWasmAbi + 'static,
         {
+            #[cfg_attr(wasm_bindgen_unstable_test_coverage, coverage(off))]
             fn describe() {
                 #[allow(non_snake_case)]
+                #[cfg_attr(wasm_bindgen_unstable_test_coverage, coverage(off))]
                 unsafe extern "C" fn invoke<$($var: FromWasmAbi,)* R: ReturnWasmAbi>(
                     a: usize,
                     b: usize,
-                    $($var: <$var as FromWasmAbi>::Abi),*
-                ) -> <R as ReturnWasmAbi>::Abi {
+                    $(
+                    $arg1: <$var::Abi as WasmAbi>::Prim1,
+                    $arg2: <$var::Abi as WasmAbi>::Prim2,
+                    $arg3: <$var::Abi as WasmAbi>::Prim3,
+                    $arg4: <$var::Abi as WasmAbi>::Prim4,
+                    )*
+                ) -> WasmRet<R::Abi> {
                     if a == 0 {
                         throw_str("closure invoked recursively or after being dropped");
                     }
@@ -633,14 +651,14 @@ macro_rules! doit {
                             FatPtr { fields: (a, b) }.ptr;
                         let f = f as *mut dyn FnMut($($var),*) -> R;
                         $(
-                            let $var = <$var as FromWasmAbi>::from_abi($var);
+                            let $var = <$var as FromWasmAbi>::from_abi($var::Abi::join($arg1, $arg2, $arg3, $arg4));
                         )*
                         (*f)($($var),*)
                     };
-                    ret.return_abi()
+                    ret.return_abi().into()
                 }
 
-                inform(invoke::<$($var,)* R> as u32);
+                inform(invoke::<$($var,)* R> as usize as u32);
 
                 unsafe extern fn destroy<$($var: FromWasmAbi,)* R: ReturnWasmAbi>(
                     a: usize,
@@ -654,7 +672,7 @@ macro_rules! doit {
                         fields: (a, b)
                     }.ptr));
                 }
-                inform(destroy::<$($var,)* R> as u32);
+                inform(destroy::<$($var,)* R> as usize as u32);
 
                 <&mut Self>::describe();
             }
@@ -677,7 +695,7 @@ macro_rules! doit {
             }
 
             fn into_js_function(self) -> JsValue {
-                use std::rc::Rc;
+                use alloc::rc::Rc;
                 use crate::__rt::WasmRefCell;
 
                 let mut me = Some(self);
@@ -730,14 +748,14 @@ macro_rules! doit {
 
 doit! {
     ()
-    (A)
-    (A B)
-    (A B C)
-    (A B C D)
-    (A B C D E)
-    (A B C D E F)
-    (A B C D E F G)
-    (A B C D E F G H)
+    (A a1 a2 a3 a4)
+    (A a1 a2 a3 a4 B b1 b2 b3 b4)
+    (A a1 a2 a3 a4 B b1 b2 b3 b4 C c1 c2 c3 c4)
+    (A a1 a2 a3 a4 B b1 b2 b3 b4 C c1 c2 c3 c4 D d1 d2 d3 d4)
+    (A a1 a2 a3 a4 B b1 b2 b3 b4 C c1 c2 c3 c4 D d1 d2 d3 d4 E e1 e2 e3 e4)
+    (A a1 a2 a3 a4 B b1 b2 b3 b4 C c1 c2 c3 c4 D d1 d2 d3 d4 E e1 e2 e3 e4 F f1 f2 f3 f4)
+    (A a1 a2 a3 a4 B b1 b2 b3 b4 C c1 c2 c3 c4 D d1 d2 d3 d4 E e1 e2 e3 e4 F f1 f2 f3 f4 G g1 g2 g3 g4)
+    (A a1 a2 a3 a4 B b1 b2 b3 b4 C c1 c2 c3 c4 D d1 d2 d3 d4 E e1 e2 e3 e4 F f1 f2 f3 f4 G g1 g2 g3 g4 H h1 h2 h3 h4)
 }
 
 // Copy the above impls down here for where there's only one argument and it's a
@@ -751,13 +769,18 @@ where
     A: RefFromWasmAbi,
     R: ReturnWasmAbi + 'static,
 {
+    #[cfg_attr(wasm_bindgen_unstable_test_coverage, coverage(off))]
     fn describe() {
         #[allow(non_snake_case)]
+        #[cfg_attr(wasm_bindgen_unstable_test_coverage, coverage(off))]
         unsafe extern "C" fn invoke<A: RefFromWasmAbi, R: ReturnWasmAbi>(
             a: usize,
             b: usize,
-            arg: <A as RefFromWasmAbi>::Abi,
-        ) -> <R as ReturnWasmAbi>::Abi {
+            arg1: <A::Abi as WasmAbi>::Prim1,
+            arg2: <A::Abi as WasmAbi>::Prim2,
+            arg3: <A::Abi as WasmAbi>::Prim3,
+            arg4: <A::Abi as WasmAbi>::Prim4,
+        ) -> WasmRet<R::Abi> {
             if a == 0 {
                 throw_str("closure invoked after being dropped");
             }
@@ -766,14 +789,15 @@ where
             // example)
             let ret = {
                 let f: *const dyn Fn(&A) -> R = FatPtr { fields: (a, b) }.ptr;
-                let arg = <A as RefFromWasmAbi>::ref_from_abi(arg);
+                let arg = <A as RefFromWasmAbi>::ref_from_abi(A::Abi::join(arg1, arg2, arg3, arg4));
                 (*f)(&*arg)
             };
-            ret.return_abi()
+            ret.return_abi().into()
         }
 
-        inform(invoke::<A, R> as u32);
+        inform(invoke::<A, R> as usize as u32);
 
+        #[cfg_attr(wasm_bindgen_unstable_test_coverage, coverage(off))]
         unsafe extern "C" fn destroy<A: RefFromWasmAbi, R: ReturnWasmAbi>(a: usize, b: usize) {
             // See `Fn()` above for why we simply return
             if a == 0 {
@@ -783,7 +807,7 @@ where
                 FatPtr::<dyn Fn(&A) -> R> { fields: (a, b) }.ptr,
             ));
         }
-        inform(destroy::<A, R> as u32);
+        inform(destroy::<A, R> as usize as u32);
 
         <&Self>::describe();
     }
@@ -794,13 +818,18 @@ where
     A: RefFromWasmAbi,
     R: ReturnWasmAbi + 'static,
 {
+    #[cfg_attr(wasm_bindgen_unstable_test_coverage, coverage(off))]
     fn describe() {
         #[allow(non_snake_case)]
+        #[cfg_attr(wasm_bindgen_unstable_test_coverage, coverage(off))]
         unsafe extern "C" fn invoke<A: RefFromWasmAbi, R: ReturnWasmAbi>(
             a: usize,
             b: usize,
-            arg: <A as RefFromWasmAbi>::Abi,
-        ) -> <R as ReturnWasmAbi>::Abi {
+            arg1: <A::Abi as WasmAbi>::Prim1,
+            arg2: <A::Abi as WasmAbi>::Prim2,
+            arg3: <A::Abi as WasmAbi>::Prim3,
+            arg4: <A::Abi as WasmAbi>::Prim4,
+        ) -> WasmRet<R::Abi> {
             if a == 0 {
                 throw_str("closure invoked recursively or after being dropped");
             }
@@ -810,14 +839,15 @@ where
             let ret = {
                 let f: *const dyn FnMut(&A) -> R = FatPtr { fields: (a, b) }.ptr;
                 let f = f as *mut dyn FnMut(&A) -> R;
-                let arg = <A as RefFromWasmAbi>::ref_from_abi(arg);
+                let arg = <A as RefFromWasmAbi>::ref_from_abi(A::Abi::join(arg1, arg2, arg3, arg4));
                 (*f)(&*arg)
             };
-            ret.return_abi()
+            ret.return_abi().into()
         }
 
-        inform(invoke::<A, R> as u32);
+        inform(invoke::<A, R> as usize as u32);
 
+        #[cfg_attr(wasm_bindgen_unstable_test_coverage, coverage(off))]
         unsafe extern "C" fn destroy<A: RefFromWasmAbi, R: ReturnWasmAbi>(a: usize, b: usize) {
             // See `Fn()` above for why we simply return
             if a == 0 {
@@ -827,7 +857,7 @@ where
                 FatPtr::<dyn FnMut(&A) -> R> { fields: (a, b) }.ptr,
             ));
         }
-        inform(destroy::<A, R> as u32);
+        inform(destroy::<A, R> as usize as u32);
 
         <&mut Self>::describe();
     }
@@ -852,7 +882,7 @@ where
 
     fn into_js_function(self) -> JsValue {
         use crate::__rt::WasmRefCell;
-        use std::rc::Rc;
+        use alloc::rc::Rc;
 
         let mut me = Some(self);
 

@@ -1,4 +1,5 @@
 #![allow(unused_imports)]
+#![allow(clippy::all)]
 use super::*;
 use wasm_bindgen::prelude::*;
 #[cfg(web_sys_unstable_apis)]
@@ -115,7 +116,7 @@ extern "C" {
     #[doc = ""]
     #[doc = "*This API is unstable and requires `--cfg=web_sys_unstable_apis` to be activated, as"]
     #[doc = "[described in the `wasm-bindgen` guide](https://rustwasm.github.io/docs/wasm-bindgen/web-sys/unstable-apis.html)*"]
-    pub fn label(this: &GpuTexture) -> String;
+    pub fn label(this: &GpuTexture) -> ::alloc::string::String;
     #[cfg(web_sys_unstable_apis)]
     # [wasm_bindgen (structural , method , setter , js_class = "GPUTexture" , js_name = label)]
     #[doc = "Setter for the `label` field of this object."]
@@ -129,7 +130,7 @@ extern "C" {
     pub fn set_label(this: &GpuTexture, value: &str);
     #[cfg(web_sys_unstable_apis)]
     #[cfg(feature = "GpuTextureView")]
-    # [wasm_bindgen (method , structural , js_class = "GPUTexture" , js_name = createView)]
+    # [wasm_bindgen (catch , method , structural , js_class = "GPUTexture" , js_name = createView)]
     #[doc = "The `createView()` method."]
     #[doc = ""]
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/GPUTexture/createView)"]
@@ -138,10 +139,10 @@ extern "C" {
     #[doc = ""]
     #[doc = "*This API is unstable and requires `--cfg=web_sys_unstable_apis` to be activated, as"]
     #[doc = "[described in the `wasm-bindgen` guide](https://rustwasm.github.io/docs/wasm-bindgen/web-sys/unstable-apis.html)*"]
-    pub fn create_view(this: &GpuTexture) -> GpuTextureView;
+    pub fn create_view(this: &GpuTexture) -> Result<GpuTextureView, JsValue>;
     #[cfg(web_sys_unstable_apis)]
     #[cfg(all(feature = "GpuTextureView", feature = "GpuTextureViewDescriptor",))]
-    # [wasm_bindgen (method , structural , js_class = "GPUTexture" , js_name = createView)]
+    # [wasm_bindgen (catch , method , structural , js_class = "GPUTexture" , js_name = createView)]
     #[doc = "The `createView()` method."]
     #[doc = ""]
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/GPUTexture/createView)"]
@@ -153,7 +154,7 @@ extern "C" {
     pub fn create_view_with_descriptor(
         this: &GpuTexture,
         descriptor: &GpuTextureViewDescriptor,
-    ) -> GpuTextureView;
+    ) -> Result<GpuTextureView, JsValue>;
     #[cfg(web_sys_unstable_apis)]
     # [wasm_bindgen (method , structural , js_class = "GPUTexture" , js_name = destroy)]
     #[doc = "The `destroy()` method."]

@@ -1,4 +1,5 @@
 #![allow(unused_imports)]
+#![allow(clippy::all)]
 use super::*;
 use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
@@ -17,28 +18,28 @@ extern "C" {
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/Plugin/description)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `Plugin`*"]
-    pub fn description(this: &Plugin) -> String;
+    pub fn description(this: &Plugin) -> ::alloc::string::String;
     # [wasm_bindgen (structural , method , getter , js_class = "Plugin" , js_name = filename)]
     #[doc = "Getter for the `filename` field of this object."]
     #[doc = ""]
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/Plugin/filename)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `Plugin`*"]
-    pub fn filename(this: &Plugin) -> String;
+    pub fn filename(this: &Plugin) -> ::alloc::string::String;
     # [wasm_bindgen (structural , method , getter , js_class = "Plugin" , js_name = version)]
     #[doc = "Getter for the `version` field of this object."]
     #[doc = ""]
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/Plugin/version)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `Plugin`*"]
-    pub fn version(this: &Plugin) -> String;
+    pub fn version(this: &Plugin) -> ::alloc::string::String;
     # [wasm_bindgen (structural , method , getter , js_class = "Plugin" , js_name = name)]
     #[doc = "Getter for the `name` field of this object."]
     #[doc = ""]
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/Plugin/name)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `Plugin`*"]
-    pub fn name(this: &Plugin) -> String;
+    pub fn name(this: &Plugin) -> ::alloc::string::String;
     # [wasm_bindgen (structural , method , getter , js_class = "Plugin" , js_name = length)]
     #[doc = "Getter for the `length` field of this object."]
     #[doc = ""]
@@ -64,7 +65,7 @@ extern "C" {
     pub fn named_item(this: &Plugin, name: &str) -> Option<MimeType>;
     #[cfg(feature = "MimeType")]
     #[wasm_bindgen(method, structural, js_class = "Plugin", indexing_getter)]
-    #[doc = "Indexing getter."]
+    #[doc = "Indexing getter. As in the literal Javascript `this[key]`."]
     #[doc = ""]
     #[doc = ""]
     #[doc = ""]
@@ -72,7 +73,7 @@ extern "C" {
     pub fn get_with_index(this: &Plugin, index: u32) -> Option<MimeType>;
     #[cfg(feature = "MimeType")]
     #[wasm_bindgen(method, structural, js_class = "Plugin", indexing_getter)]
-    #[doc = "Indexing getter."]
+    #[doc = "Indexing getter. As in the literal Javascript `this[key]`."]
     #[doc = ""]
     #[doc = ""]
     #[doc = ""]

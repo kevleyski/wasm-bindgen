@@ -1,4 +1,5 @@
 #![allow(unused_imports)]
+#![allow(clippy::all)]
 use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
 #[doc = "The `IdbTransactionMode` enum."]
@@ -8,7 +9,7 @@ use wasm_bindgen::prelude::*;
 pub enum IdbTransactionMode {
     Readonly = "readonly",
     Readwrite = "readwrite",
+    Versionchange = "versionchange",
     Readwriteflush = "readwriteflush",
     Cleanup = "cleanup",
-    Versionchange = "versionchange",
 }

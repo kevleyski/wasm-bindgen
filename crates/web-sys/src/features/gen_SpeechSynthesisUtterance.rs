@@ -1,4 +1,5 @@
 #![allow(unused_imports)]
+#![allow(clippy::all)]
 use super::*;
 use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
@@ -17,7 +18,7 @@ extern "C" {
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/SpeechSynthesisUtterance/text)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `SpeechSynthesisUtterance`*"]
-    pub fn text(this: &SpeechSynthesisUtterance) -> String;
+    pub fn text(this: &SpeechSynthesisUtterance) -> ::alloc::string::String;
     # [wasm_bindgen (structural , method , setter , js_class = "SpeechSynthesisUtterance" , js_name = text)]
     #[doc = "Setter for the `text` field of this object."]
     #[doc = ""]
@@ -31,7 +32,7 @@ extern "C" {
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/SpeechSynthesisUtterance/lang)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `SpeechSynthesisUtterance`*"]
-    pub fn lang(this: &SpeechSynthesisUtterance) -> String;
+    pub fn lang(this: &SpeechSynthesisUtterance) -> ::alloc::string::String;
     # [wasm_bindgen (structural , method , setter , js_class = "SpeechSynthesisUtterance" , js_name = lang)]
     #[doc = "Setter for the `lang` field of this object."]
     #[doc = ""]

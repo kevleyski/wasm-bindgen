@@ -1,4 +1,5 @@
 #![allow(unused_imports)]
+#![allow(clippy::all)]
 use super::*;
 use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
@@ -17,7 +18,7 @@ extern "C" {
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/HTMLTrackElement/kind)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `HtmlTrackElement`*"]
-    pub fn kind(this: &HtmlTrackElement) -> String;
+    pub fn kind(this: &HtmlTrackElement) -> ::alloc::string::String;
     # [wasm_bindgen (structural , method , setter , js_class = "HTMLTrackElement" , js_name = kind)]
     #[doc = "Setter for the `kind` field of this object."]
     #[doc = ""]
@@ -31,7 +32,7 @@ extern "C" {
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/HTMLTrackElement/src)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `HtmlTrackElement`*"]
-    pub fn src(this: &HtmlTrackElement) -> String;
+    pub fn src(this: &HtmlTrackElement) -> ::alloc::string::String;
     # [wasm_bindgen (structural , method , setter , js_class = "HTMLTrackElement" , js_name = src)]
     #[doc = "Setter for the `src` field of this object."]
     #[doc = ""]
@@ -45,7 +46,7 @@ extern "C" {
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/HTMLTrackElement/srclang)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `HtmlTrackElement`*"]
-    pub fn srclang(this: &HtmlTrackElement) -> String;
+    pub fn srclang(this: &HtmlTrackElement) -> ::alloc::string::String;
     # [wasm_bindgen (structural , method , setter , js_class = "HTMLTrackElement" , js_name = srclang)]
     #[doc = "Setter for the `srclang` field of this object."]
     #[doc = ""]
@@ -59,7 +60,7 @@ extern "C" {
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/HTMLTrackElement/label)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `HtmlTrackElement`*"]
-    pub fn label(this: &HtmlTrackElement) -> String;
+    pub fn label(this: &HtmlTrackElement) -> ::alloc::string::String;
     # [wasm_bindgen (structural , method , setter , js_class = "HTMLTrackElement" , js_name = label)]
     #[doc = "Setter for the `label` field of this object."]
     #[doc = ""]

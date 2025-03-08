@@ -24,6 +24,7 @@ extern "C" {
     fn js_access_fields();
     fn js_renamed_export();
     fn js_renamed_field();
+    fn js_conditional_skip();
     fn js_conditional_bindings();
 
     fn js_assert_none(a: Option<OptionClass>);
@@ -34,6 +35,7 @@ extern "C" {
     fn js_test_option_classes();
     fn js_test_inspectable_classes();
     fn js_test_inspectable_classes_can_override_generated_methods();
+    fn js_test_class_defined_in_macro();
 }
 
 #[wasm_bindgen_test]
@@ -450,9 +452,7 @@ impl RenamedExport {
     }
     pub fn foo(&self) {}
 
-    pub fn bar(&self, other: &RenamedExport) {
-        drop(other);
-    }
+    pub fn bar(&self, _: &RenamedExport) {}
 }
 
 #[wasm_bindgen_test]
@@ -479,6 +479,41 @@ impl RenamedField {
 #[wasm_bindgen_test]
 fn renamed_field() {
     js_renamed_field();
+}
+
+#[cfg_attr(
+    target_arch = "wasm32",
+    wasm_bindgen(inspectable, js_name = "ConditionalSkipClass")
+)]
+pub struct ConditionalSkip {
+    /// [u8; 8] cannot be passed to JS, so this won't compile without `skip`
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(skip))]
+    pub skipped_field: [u8; 8],
+
+    /// this field shouldn't be skipped as predicate is false
+    #[cfg_attr(all(target_arch = "wasm32", target_arch = "x86"), wasm_bindgen(skip))]
+    pub not_skipped_field: u32,
+
+    /// String struct field requires `getter_with_clone` to compile
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter_with_clone))]
+    pub needs_clone: String,
+}
+
+#[wasm_bindgen(js_class = "ConditionalSkipClass")]
+impl ConditionalSkip {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> ConditionalSkip {
+        ConditionalSkip {
+            skipped_field: [0u8; 8],
+            not_skipped_field: 42,
+            needs_clone: "foo".to_string(),
+        }
+    }
+}
+
+#[wasm_bindgen_test]
+fn conditional_skip() {
+    js_conditional_skip();
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
@@ -534,7 +569,7 @@ mod works_in_module {
     use wasm_bindgen::prelude::wasm_bindgen;
 
     #[wasm_bindgen]
-    pub struct WorksInModule(u32);
+    pub struct WorksInModule(#[allow(dead_code)] u32);
 
     #[wasm_bindgen]
     impl WorksInModule {
@@ -599,12 +634,36 @@ impl OverriddenInspectable {
     }
 
     #[wasm_bindgen(js_name = toJSON)]
-    pub fn to_json(&self) -> String {
+    pub fn js_to_json(&self) -> String {
         String::from("JSON was overwritten")
     }
 
     #[wasm_bindgen(js_name = toString)]
-    pub fn to_string(&self) -> String {
+    pub fn js_to_string(&self) -> String {
         String::from("string was overwritten")
     }
+}
+
+macro_rules! make_struct {
+    ($field:ident) => {
+        #[wasm_bindgen]
+        pub struct InsideMacro {
+            pub $field: u32,
+        }
+    };
+}
+
+make_struct!(a);
+
+#[wasm_bindgen]
+impl InsideMacro {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self { a: 3 }
+    }
+}
+
+#[wasm_bindgen_test]
+fn class_defined_in_macro() {
+    js_test_class_defined_in_macro();
 }

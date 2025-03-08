@@ -1,4 +1,5 @@
 #![allow(unused_imports)]
+#![allow(clippy::all)]
 use super::*;
 use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
@@ -17,14 +18,14 @@ extern "C" {
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/Exception/name)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `Exception`*"]
-    pub fn name(this: &Exception) -> String;
+    pub fn name(this: &Exception) -> ::alloc::string::String;
     # [wasm_bindgen (structural , method , getter , js_class = "Exception" , js_name = message)]
     #[doc = "Getter for the `message` field of this object."]
     #[doc = ""]
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/Exception/message)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `Exception`*"]
-    pub fn message(this: &Exception) -> String;
+    pub fn message(this: &Exception) -> ::alloc::string::String;
     # [wasm_bindgen (structural , method , getter , js_class = "Exception" , js_name = result)]
     #[doc = "Getter for the `result` field of this object."]
     #[doc = ""]
@@ -38,7 +39,7 @@ extern "C" {
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/Exception/filename)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `Exception`*"]
-    pub fn filename(this: &Exception) -> String;
+    pub fn filename(this: &Exception) -> ::alloc::string::String;
     # [wasm_bindgen (structural , method , getter , js_class = "Exception" , js_name = lineNumber)]
     #[doc = "Getter for the `lineNumber` field of this object."]
     #[doc = ""]
@@ -66,5 +67,5 @@ extern "C" {
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/Exception/stack)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `Exception`*"]
-    pub fn stack(this: &Exception) -> String;
+    pub fn stack(this: &Exception) -> ::alloc::string::String;
 }

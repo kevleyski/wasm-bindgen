@@ -1,4 +1,5 @@
 #![allow(unused_imports)]
+#![allow(clippy::all)]
 use super::*;
 use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
@@ -25,7 +26,7 @@ extern "C" {
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/FetchEvent/clientId)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `FetchEvent`*"]
-    pub fn client_id(this: &FetchEvent) -> Option<String>;
+    pub fn client_id(this: &FetchEvent) -> Option<::alloc::string::String>;
     # [wasm_bindgen (structural , method , getter , js_class = "FetchEvent" , js_name = isReload)]
     #[doc = "Getter for the `isReload` field of this object."]
     #[doc = ""]

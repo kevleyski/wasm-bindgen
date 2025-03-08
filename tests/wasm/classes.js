@@ -46,7 +46,7 @@ exports.js_exceptions = () => {
     // TODO: throws because it tries to borrow_mut, but the throw_str from the previous line doesn't clean up the
     // RefMut so the object is left in a broken state.
     // We still try to call free here so the object is removed from the FinalizationRegistry when weak refs are enabled.
-    assert.throws(() => b.free(), /recursive use of an object/);
+    assert.throws(() => b.free(), /attempted to take ownership/);
 
     let c = wasm.ClassesExceptions1.new();
     let d = wasm.ClassesExceptions2.new();
@@ -170,6 +170,13 @@ exports.js_renamed_field = () => {
     x.foo();
 }
 
+exports.js_conditional_skip = () => {
+    const x = new wasm.ConditionalSkipClass();
+    assert.strictEqual(x.skipped_field, undefined);
+    assert.ok(x.not_skipped_field === 42);
+    assert.strictEqual(x.needs_clone, 'foo');
+}
+
 exports.js_conditional_bindings = () => {
     const x = new wasm.ConditionalBindings();
     x.free();
@@ -240,4 +247,11 @@ exports.js_test_inspectable_classes_can_override_generated_methods = () => {
     assert.deepStrictEqual(overridden_inspectable.toJSON(), 'JSON was overwritten');
     assert.strictEqual(overridden_inspectable.toString(), 'string was overwritten');
     overridden_inspectable.free();
+};
+
+exports.js_test_class_defined_in_macro = () => {
+    const macroClass = new wasm.InsideMacro();
+    assert.strictEqual(macroClass.a, 3);
+    macroClass.a = 5;
+    assert.strictEqual(macroClass.a, 5);
 };

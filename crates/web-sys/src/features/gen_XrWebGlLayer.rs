@@ -1,4 +1,5 @@
 #![allow(unused_imports)]
+#![allow(clippy::all)]
 use super::*;
 use wasm_bindgen::prelude::*;
 #[cfg(web_sys_unstable_apis)]
@@ -168,7 +169,7 @@ extern "C" {
     # [wasm_bindgen (static_method_of = XrWebGlLayer , js_class = "XRWebGLLayer" , js_name = getNativeFramebufferScaleFactor)]
     #[doc = "The `getNativeFramebufferScaleFactor()` method."]
     #[doc = ""]
-    #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/XRWebGLLayer/getNativeFramebufferScaleFactor)"]
+    #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/XRWebGLLayer/getNativeFramebufferScaleFactor_static)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `XrSession`, `XrWebGlLayer`*"]
     #[doc = ""]

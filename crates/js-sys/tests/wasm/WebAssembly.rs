@@ -2,7 +2,6 @@ use js_sys::*;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use wasm_bindgen_test::*;
-use web_sys::{Headers, Response, ResponseInit};
 
 #[wasm_bindgen(module = "tests/wasm/WebAssembly.js")]
 extern "C" {
@@ -102,7 +101,7 @@ fn module_imports() {
 
 #[wasm_bindgen_test]
 fn table_inheritance() {
-    let table = WebAssembly::Table::new(&get_table_object().into()).unwrap();
+    let table = WebAssembly::Table::new(&get_table_object()).unwrap();
     assert!(table.is_instance_of::<WebAssembly::Table>());
     assert!(table.is_instance_of::<Object>());
 
@@ -119,7 +118,7 @@ fn table_error() {
 
 #[wasm_bindgen_test]
 fn table() {
-    let table = WebAssembly::Table::new(&get_table_object().into()).unwrap();
+    let table = WebAssembly::Table::new(&get_table_object()).unwrap();
     assert_eq!(table.length(), 1);
 
     assert!(table.get(0).is_ok());

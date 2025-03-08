@@ -6,10 +6,10 @@ use walrus::ValType;
 
 impl InstructionBuilder<'_, '_> {
     /// Processes one more `Descriptor` as an argument to a JS function that
-    /// wasm is calling.
+    /// Wasm is calling.
     ///
     /// This will internally skip `Unit` and otherwise build up the `bindings`
-    /// map and ensure that it's correctly mapped from wasm to JS.
+    /// map and ensure that it's correctly mapped from Wasm to JS.
     pub fn outgoing(&mut self, arg: &Descriptor) -> Result<(), Error> {
         if let Descriptor::Unit = arg {
             return Ok(());
@@ -65,6 +65,20 @@ impl InstructionBuilder<'_, '_> {
             Descriptor::U32 => self.outgoing_i32(AdapterType::U32),
             Descriptor::I64 => self.outgoing_i64(AdapterType::I64),
             Descriptor::U64 => self.outgoing_i64(AdapterType::U64),
+            Descriptor::I128 => {
+                self.instruction(
+                    &[AdapterType::I64, AdapterType::I64],
+                    Instruction::WasmToInt128 { signed: true },
+                    &[AdapterType::S128],
+                );
+            }
+            Descriptor::U128 => {
+                self.instruction(
+                    &[AdapterType::I64, AdapterType::I64],
+                    Instruction::WasmToInt128 { signed: false },
+                    &[AdapterType::U128],
+                );
+            }
             Descriptor::F32 => {
                 self.get(AdapterType::F32);
                 self.output.push(AdapterType::F32);
@@ -73,7 +87,8 @@ impl InstructionBuilder<'_, '_> {
                 self.get(AdapterType::F64);
                 self.output.push(AdapterType::F64);
             }
-            Descriptor::Enum { .. } => self.outgoing_i32(AdapterType::U32),
+            Descriptor::Enum { name, .. } => self.outgoing_i32(AdapterType::Enum(name.clone())),
+            Descriptor::StringEnum { name, .. } => self.outgoing_string_enum(name),
 
             Descriptor::Char => {
                 self.instruction(
@@ -95,7 +110,7 @@ impl InstructionBuilder<'_, '_> {
             Descriptor::Ref(d) => self.outgoing_ref(false, d)?,
             Descriptor::RefMut(d) => self.outgoing_ref(true, d)?,
 
-            Descriptor::CachedString => self.cached_string(false, true)?,
+            Descriptor::CachedString => self.cached_string(true)?,
 
             Descriptor::String => {
                 // fetch the ptr/length ...
@@ -105,7 +120,7 @@ impl InstructionBuilder<'_, '_> {
                 // ... then defer a call to `free` to happen later
                 let free = self.cx.free()?;
                 self.instructions.push(InstructionData {
-                    instr: Instruction::DeferCallCore(free),
+                    instr: Instruction::DeferFree { free, align: 1 },
                     stack_change: StackChange::Modified {
                         popped: 2,
                         pushed: 2,
@@ -156,6 +171,8 @@ impl InstructionBuilder<'_, '_> {
 
             // Largely synthetic and can't show up
             Descriptor::ClampedU8 => unreachable!(),
+
+            Descriptor::NonNull => self.outgoing_i32(AdapterType::NonNull),
         }
         Ok(())
     }
@@ -176,7 +193,7 @@ impl InstructionBuilder<'_, '_> {
                     &[AdapterType::NamedExternref(name.clone())],
                 );
             }
-            Descriptor::CachedString => self.cached_string(false, false)?,
+            Descriptor::CachedString => self.cached_string(false)?,
 
             Descriptor::String => {
                 self.instruction(
@@ -205,7 +222,7 @@ impl InstructionBuilder<'_, '_> {
 
             Descriptor::Function(descriptor) => {
                 // synthesize the a/b arguments that aren't present in the
-                // signature from wasm-bindgen but are present in the wasm file.
+                // signature from wasm-bindgen but are present in the Wasm file.
                 let mut descriptor = (**descriptor).clone();
                 let nargs = descriptor.arguments.len();
                 descriptor.arguments.insert(0, Descriptor::I32);
@@ -254,16 +271,30 @@ impl InstructionBuilder<'_, '_> {
                     &[AdapterType::NamedExternref(name.clone()).option()],
                 );
             }
-            Descriptor::I8 => self.out_option_sentinel(AdapterType::S8),
-            Descriptor::U8 => self.out_option_sentinel(AdapterType::U8),
-            Descriptor::I16 => self.out_option_sentinel(AdapterType::S16),
-            Descriptor::U16 => self.out_option_sentinel(AdapterType::U16),
-            Descriptor::I32 => self.option_native(true, ValType::I32),
-            Descriptor::U32 => self.option_native(false, ValType::I32),
+            Descriptor::I8 => self.out_option_sentinel32(AdapterType::S8),
+            Descriptor::U8 => self.out_option_sentinel32(AdapterType::U8),
+            Descriptor::I16 => self.out_option_sentinel32(AdapterType::S16),
+            Descriptor::U16 => self.out_option_sentinel32(AdapterType::U16),
+            Descriptor::I32 => self.out_option_sentinel64(AdapterType::S32),
+            Descriptor::U32 => self.out_option_sentinel64(AdapterType::U32),
             Descriptor::I64 => self.option_native(true, ValType::I64),
             Descriptor::U64 => self.option_native(false, ValType::I64),
-            Descriptor::F32 => self.option_native(true, ValType::F32),
+            Descriptor::F32 => self.out_option_sentinel64(AdapterType::F32),
             Descriptor::F64 => self.option_native(true, ValType::F64),
+            Descriptor::I128 => {
+                self.instruction(
+                    &[AdapterType::I32, AdapterType::I64, AdapterType::I64],
+                    Instruction::OptionWasmToInt128 { signed: true },
+                    &[AdapterType::S128.option()],
+                );
+            }
+            Descriptor::U128 => {
+                self.instruction(
+                    &[AdapterType::I32, AdapterType::I64, AdapterType::I64],
+                    Instruction::OptionWasmToInt128 { signed: false },
+                    &[AdapterType::U128.option()],
+                );
+            }
             Descriptor::Boolean => {
                 self.instruction(
                     &[AdapterType::I32],
@@ -278,11 +309,18 @@ impl InstructionBuilder<'_, '_> {
                     &[AdapterType::String.option()],
                 );
             }
-            Descriptor::Enum { hole } => {
+            Descriptor::Enum { name, hole } => {
                 self.instruction(
                     &[AdapterType::I32],
                     Instruction::OptionEnumFromI32 { hole: *hole },
-                    &[AdapterType::U32.option()],
+                    &[AdapterType::Enum(name.clone()).option()],
+                );
+            }
+            Descriptor::StringEnum { name, .. } => {
+                self.instruction(
+                    &[AdapterType::I32],
+                    Instruction::OptionWasmToStringEnum { name: name.clone() },
+                    &[AdapterType::StringEnum(name.clone()).option()],
                 );
             }
             Descriptor::RustStruct(name) => {
@@ -297,7 +335,7 @@ impl InstructionBuilder<'_, '_> {
             Descriptor::Ref(d) => self.outgoing_option_ref(false, d)?,
             Descriptor::RefMut(d) => self.outgoing_option_ref(true, d)?,
 
-            Descriptor::CachedString => self.cached_string(true, true)?,
+            Descriptor::CachedString => self.cached_string(true)?,
 
             Descriptor::String | Descriptor::Vector(_) => {
                 let kind = arg.vector_kind().ok_or_else(|| {
@@ -318,6 +356,12 @@ impl InstructionBuilder<'_, '_> {
                     &[AdapterType::Vector(kind).option()],
                 );
             }
+
+            Descriptor::NonNull => self.instruction(
+                &[AdapterType::I32],
+                Instruction::OptionNonNullFromI32,
+                &[AdapterType::NonNull.option()],
+            ),
 
             _ => bail!(
                 "unsupported optional argument type for calling JS function from Rust: {:?}",
@@ -341,16 +385,20 @@ impl InstructionBuilder<'_, '_> {
             | Descriptor::F64
             | Descriptor::I64
             | Descriptor::U64
+            | Descriptor::I128
+            | Descriptor::U128
             | Descriptor::Boolean
             | Descriptor::Char
             | Descriptor::Enum { .. }
+            | Descriptor::StringEnum { .. }
             | Descriptor::RustStruct(_)
             | Descriptor::Ref(_)
             | Descriptor::RefMut(_)
             | Descriptor::CachedString
             | Descriptor::Option(_)
             | Descriptor::Vector(_)
-            | Descriptor::Unit => {
+            | Descriptor::Unit
+            | Descriptor::NonNull => {
                 // We must throw before reading the Ok type, if there is an error. However, the
                 // structure of ResultAbi is that the Err value + discriminant come last (for
                 // alignment reasons). So the UnwrapResult instruction must come first, but the
@@ -389,7 +437,7 @@ impl InstructionBuilder<'_, '_> {
                 // special case it.
                 assert!(!self.instructions[len..]
                     .iter()
-                    .any(|idata| matches!(idata.instr, Instruction::DeferCallCore(_))));
+                    .any(|idata| matches!(idata.instr, Instruction::DeferFree { .. })));
 
                 // Finally, we add the two inputs to UnwrapResult, and everything checks out
                 //
@@ -429,7 +477,7 @@ impl InstructionBuilder<'_, '_> {
                 // implementation.
                 let free = self.cx.free()?;
                 self.instructions.push(InstructionData {
-                    instr: Instruction::DeferCallCore(free),
+                    instr: Instruction::DeferFree { free, align: 1 },
                     stack_change: StackChange::Modified {
                         popped: 2,
                         pushed: 2,
@@ -477,7 +525,7 @@ impl InstructionBuilder<'_, '_> {
                     &[AdapterType::NamedExternref(name.clone()).option()],
                 );
             }
-            Descriptor::CachedString => self.cached_string(true, false)?,
+            Descriptor::CachedString => self.cached_string(false)?,
             Descriptor::String | Descriptor::Slice(_) => {
                 let kind = arg.vector_kind().ok_or_else(|| {
                     format_err!(
@@ -503,30 +551,36 @@ impl InstructionBuilder<'_, '_> {
         Ok(())
     }
 
+    fn outgoing_string_enum(&mut self, name: &str) {
+        self.instruction(
+            &[AdapterType::I32],
+            Instruction::WasmToStringEnum {
+                name: name.to_string(),
+            },
+            &[AdapterType::StringEnum(name.to_string())],
+        );
+    }
+
     fn outgoing_i32(&mut self, output: AdapterType) {
-        let instr = Instruction::WasmToInt {
-            input: walrus::ValType::I32,
-            output: output.clone(),
+        let instr = Instruction::WasmToInt32 {
+            unsigned_32: output == AdapterType::U32 || output == AdapterType::NonNull,
         };
         self.instruction(&[AdapterType::I32], instr, &[output]);
     }
-
     fn outgoing_i64(&mut self, output: AdapterType) {
-        let instr = Instruction::WasmToInt {
-            input: walrus::ValType::I64,
-            output: output.clone(),
+        let instr = Instruction::WasmToInt64 {
+            unsigned: output == AdapterType::U64,
         };
         self.instruction(&[AdapterType::I64], instr, &[output]);
     }
 
-    fn cached_string(&mut self, optional: bool, owned: bool) -> Result<(), Error> {
+    fn cached_string(&mut self, owned: bool) -> Result<(), Error> {
         let mem = self.cx.memory()?;
         let free = self.cx.free()?;
         self.instruction(
             &[AdapterType::I32, AdapterType::I32],
             Instruction::CachedStringLoad {
                 owned,
-                optional,
                 mem,
                 free,
                 table: None,
@@ -545,10 +599,18 @@ impl InstructionBuilder<'_, '_> {
         );
     }
 
-    fn out_option_sentinel(&mut self, ty: AdapterType) {
+    fn out_option_sentinel32(&mut self, ty: AdapterType) {
         self.instruction(
             &[AdapterType::I32],
             Instruction::OptionU32Sentinel,
+            &[ty.option()],
+        );
+    }
+
+    fn out_option_sentinel64(&mut self, ty: AdapterType) {
+        self.instruction(
+            &[AdapterType::F64],
+            Instruction::OptionF64Sentinel,
             &[ty.option()],
         );
     }

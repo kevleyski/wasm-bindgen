@@ -1,4 +1,5 @@
 #![allow(unused_imports)]
+#![allow(clippy::all)]
 use super::*;
 use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
@@ -39,7 +40,9 @@ extern "C" {
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/globalCompositeOperation)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `CanvasRenderingContext2d`*"]
-    pub fn global_composite_operation(this: &CanvasRenderingContext2d) -> Result<String, JsValue>;
+    pub fn global_composite_operation(
+        this: &CanvasRenderingContext2d,
+    ) -> Result<::alloc::string::String, JsValue>;
     # [wasm_bindgen (structural , catch , method , setter , js_class = "CanvasRenderingContext2D" , js_name = globalCompositeOperation)]
     #[doc = "Setter for the `globalCompositeOperation` field of this object."]
     #[doc = ""]
@@ -63,7 +66,34 @@ extern "C" {
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/strokeStyle)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `CanvasRenderingContext2d`*"]
+    #[deprecated]
     pub fn set_stroke_style(this: &CanvasRenderingContext2d, value: &::wasm_bindgen::JsValue);
+    # [wasm_bindgen (structural , method , setter , js_class = "CanvasRenderingContext2D" , js_name = strokeStyle)]
+    #[doc = "Setter for the `strokeStyle` field of this object."]
+    #[doc = ""]
+    #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/strokeStyle)"]
+    #[doc = ""]
+    #[doc = "*This API requires the following crate features to be activated: `CanvasRenderingContext2d`*"]
+    pub fn set_stroke_style_str(this: &CanvasRenderingContext2d, value: &str);
+    #[cfg(feature = "CanvasGradient")]
+    # [wasm_bindgen (structural , method , setter , js_class = "CanvasRenderingContext2D" , js_name = strokeStyle)]
+    #[doc = "Setter for the `strokeStyle` field of this object."]
+    #[doc = ""]
+    #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/strokeStyle)"]
+    #[doc = ""]
+    #[doc = "*This API requires the following crate features to be activated: `CanvasGradient`, `CanvasRenderingContext2d`*"]
+    pub fn set_stroke_style_canvas_gradient(
+        this: &CanvasRenderingContext2d,
+        value: &CanvasGradient,
+    );
+    #[cfg(feature = "CanvasPattern")]
+    # [wasm_bindgen (structural , method , setter , js_class = "CanvasRenderingContext2D" , js_name = strokeStyle)]
+    #[doc = "Setter for the `strokeStyle` field of this object."]
+    #[doc = ""]
+    #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/strokeStyle)"]
+    #[doc = ""]
+    #[doc = "*This API requires the following crate features to be activated: `CanvasPattern`, `CanvasRenderingContext2d`*"]
+    pub fn set_stroke_style_canvas_pattern(this: &CanvasRenderingContext2d, value: &CanvasPattern);
     # [wasm_bindgen (structural , method , getter , js_class = "CanvasRenderingContext2D" , js_name = fillStyle)]
     #[doc = "Getter for the `fillStyle` field of this object."]
     #[doc = ""]
@@ -77,14 +107,38 @@ extern "C" {
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/fillStyle)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `CanvasRenderingContext2d`*"]
+    #[deprecated]
     pub fn set_fill_style(this: &CanvasRenderingContext2d, value: &::wasm_bindgen::JsValue);
+    # [wasm_bindgen (structural , method , setter , js_class = "CanvasRenderingContext2D" , js_name = fillStyle)]
+    #[doc = "Setter for the `fillStyle` field of this object."]
+    #[doc = ""]
+    #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/fillStyle)"]
+    #[doc = ""]
+    #[doc = "*This API requires the following crate features to be activated: `CanvasRenderingContext2d`*"]
+    pub fn set_fill_style_str(this: &CanvasRenderingContext2d, value: &str);
+    #[cfg(feature = "CanvasGradient")]
+    # [wasm_bindgen (structural , method , setter , js_class = "CanvasRenderingContext2D" , js_name = fillStyle)]
+    #[doc = "Setter for the `fillStyle` field of this object."]
+    #[doc = ""]
+    #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/fillStyle)"]
+    #[doc = ""]
+    #[doc = "*This API requires the following crate features to be activated: `CanvasGradient`, `CanvasRenderingContext2d`*"]
+    pub fn set_fill_style_canvas_gradient(this: &CanvasRenderingContext2d, value: &CanvasGradient);
+    #[cfg(feature = "CanvasPattern")]
+    # [wasm_bindgen (structural , method , setter , js_class = "CanvasRenderingContext2D" , js_name = fillStyle)]
+    #[doc = "Setter for the `fillStyle` field of this object."]
+    #[doc = ""]
+    #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/fillStyle)"]
+    #[doc = ""]
+    #[doc = "*This API requires the following crate features to be activated: `CanvasPattern`, `CanvasRenderingContext2d`*"]
+    pub fn set_fill_style_canvas_pattern(this: &CanvasRenderingContext2d, value: &CanvasPattern);
     # [wasm_bindgen (structural , method , getter , js_class = "CanvasRenderingContext2D" , js_name = filter)]
     #[doc = "Getter for the `filter` field of this object."]
     #[doc = ""]
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/filter)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `CanvasRenderingContext2d`*"]
-    pub fn filter(this: &CanvasRenderingContext2d) -> String;
+    pub fn filter(this: &CanvasRenderingContext2d) -> ::alloc::string::String;
     # [wasm_bindgen (structural , method , setter , js_class = "CanvasRenderingContext2D" , js_name = filter)]
     #[doc = "Setter for the `filter` field of this object."]
     #[doc = ""]
@@ -126,7 +180,7 @@ extern "C" {
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/lineCap)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `CanvasRenderingContext2d`*"]
-    pub fn line_cap(this: &CanvasRenderingContext2d) -> String;
+    pub fn line_cap(this: &CanvasRenderingContext2d) -> ::alloc::string::String;
     # [wasm_bindgen (structural , method , setter , js_class = "CanvasRenderingContext2D" , js_name = lineCap)]
     #[doc = "Setter for the `lineCap` field of this object."]
     #[doc = ""]
@@ -140,7 +194,7 @@ extern "C" {
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/lineJoin)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `CanvasRenderingContext2d`*"]
-    pub fn line_join(this: &CanvasRenderingContext2d) -> String;
+    pub fn line_join(this: &CanvasRenderingContext2d) -> ::alloc::string::String;
     # [wasm_bindgen (structural , method , setter , js_class = "CanvasRenderingContext2D" , js_name = lineJoin)]
     #[doc = "Setter for the `lineJoin` field of this object."]
     #[doc = ""]
@@ -224,7 +278,7 @@ extern "C" {
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/shadowColor)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `CanvasRenderingContext2d`*"]
-    pub fn shadow_color(this: &CanvasRenderingContext2d) -> String;
+    pub fn shadow_color(this: &CanvasRenderingContext2d) -> ::alloc::string::String;
     # [wasm_bindgen (structural , method , setter , js_class = "CanvasRenderingContext2D" , js_name = shadowColor)]
     #[doc = "Setter for the `shadowColor` field of this object."]
     #[doc = ""]
@@ -238,7 +292,7 @@ extern "C" {
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/font)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `CanvasRenderingContext2d`*"]
-    pub fn font(this: &CanvasRenderingContext2d) -> String;
+    pub fn font(this: &CanvasRenderingContext2d) -> ::alloc::string::String;
     # [wasm_bindgen (structural , method , setter , js_class = "CanvasRenderingContext2D" , js_name = font)]
     #[doc = "Setter for the `font` field of this object."]
     #[doc = ""]
@@ -252,7 +306,7 @@ extern "C" {
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/textAlign)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `CanvasRenderingContext2d`*"]
-    pub fn text_align(this: &CanvasRenderingContext2d) -> String;
+    pub fn text_align(this: &CanvasRenderingContext2d) -> ::alloc::string::String;
     # [wasm_bindgen (structural , method , setter , js_class = "CanvasRenderingContext2D" , js_name = textAlign)]
     #[doc = "Setter for the `textAlign` field of this object."]
     #[doc = ""]
@@ -266,7 +320,7 @@ extern "C" {
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/textBaseline)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `CanvasRenderingContext2d`*"]
-    pub fn text_baseline(this: &CanvasRenderingContext2d) -> String;
+    pub fn text_baseline(this: &CanvasRenderingContext2d) -> ::alloc::string::String;
     # [wasm_bindgen (structural , method , setter , js_class = "CanvasRenderingContext2D" , js_name = textBaseline)]
     #[doc = "Setter for the `textBaseline` field of this object."]
     #[doc = ""]
@@ -1031,23 +1085,6 @@ extern "C" {
         dirty_width: f64,
         dirty_height: f64,
     ) -> Result<(), JsValue>;
-    # [wasm_bindgen (method , structural , js_class = "CanvasRenderingContext2D" , js_name = getLineDash)]
-    #[doc = "The `getLineDash()` method."]
-    #[doc = ""]
-    #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/getLineDash)"]
-    #[doc = ""]
-    #[doc = "*This API requires the following crate features to be activated: `CanvasRenderingContext2d`*"]
-    pub fn get_line_dash(this: &CanvasRenderingContext2d) -> ::js_sys::Array;
-    # [wasm_bindgen (catch , method , structural , js_class = "CanvasRenderingContext2D" , js_name = setLineDash)]
-    #[doc = "The `setLineDash()` method."]
-    #[doc = ""]
-    #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/setLineDash)"]
-    #[doc = ""]
-    #[doc = "*This API requires the following crate features to be activated: `CanvasRenderingContext2d`*"]
-    pub fn set_line_dash(
-        this: &CanvasRenderingContext2d,
-        segments: &::wasm_bindgen::JsValue,
-    ) -> Result<(), JsValue>;
     # [wasm_bindgen (catch , method , structural , js_class = "CanvasRenderingContext2D" , js_name = arc)]
     #[doc = "The `arc()` method."]
     #[doc = ""]
@@ -1174,6 +1211,93 @@ extern "C" {
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `CanvasRenderingContext2d`*"]
     pub fn rect(this: &CanvasRenderingContext2d, x: f64, y: f64, w: f64, h: f64);
+    # [wasm_bindgen (catch , method , structural , js_class = "CanvasRenderingContext2D" , js_name = roundRect)]
+    #[doc = "The `roundRect()` method."]
+    #[doc = ""]
+    #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/roundRect)"]
+    #[doc = ""]
+    #[doc = "*This API requires the following crate features to be activated: `CanvasRenderingContext2d`*"]
+    pub fn round_rect(
+        this: &CanvasRenderingContext2d,
+        x: f64,
+        y: f64,
+        w: f64,
+        h: f64,
+    ) -> Result<(), JsValue>;
+    # [wasm_bindgen (catch , method , structural , js_class = "CanvasRenderingContext2D" , js_name = roundRect)]
+    #[doc = "The `roundRect()` method."]
+    #[doc = ""]
+    #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/roundRect)"]
+    #[doc = ""]
+    #[doc = "*This API requires the following crate features to be activated: `CanvasRenderingContext2d`*"]
+    pub fn round_rect_with_f64(
+        this: &CanvasRenderingContext2d,
+        x: f64,
+        y: f64,
+        w: f64,
+        h: f64,
+        radii: f64,
+    ) -> Result<(), JsValue>;
+    #[cfg(feature = "DomPointInit")]
+    # [wasm_bindgen (catch , method , structural , js_class = "CanvasRenderingContext2D" , js_name = roundRect)]
+    #[doc = "The `roundRect()` method."]
+    #[doc = ""]
+    #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/roundRect)"]
+    #[doc = ""]
+    #[doc = "*This API requires the following crate features to be activated: `CanvasRenderingContext2d`, `DomPointInit`*"]
+    pub fn round_rect_with_dom_point_init(
+        this: &CanvasRenderingContext2d,
+        x: f64,
+        y: f64,
+        w: f64,
+        h: f64,
+        radii: &DomPointInit,
+    ) -> Result<(), JsValue>;
+    # [wasm_bindgen (catch , method , structural , js_class = "CanvasRenderingContext2D" , js_name = roundRect)]
+    #[doc = "The `roundRect()` method."]
+    #[doc = ""]
+    #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/roundRect)"]
+    #[doc = ""]
+    #[doc = "*This API requires the following crate features to be activated: `CanvasRenderingContext2d`*"]
+    pub fn round_rect_with_f64_sequence(
+        this: &CanvasRenderingContext2d,
+        x: f64,
+        y: f64,
+        w: f64,
+        h: f64,
+        radii: &::wasm_bindgen::JsValue,
+    ) -> Result<(), JsValue>;
+    # [wasm_bindgen (catch , method , structural , js_class = "CanvasRenderingContext2D" , js_name = roundRect)]
+    #[doc = "The `roundRect()` method."]
+    #[doc = ""]
+    #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/roundRect)"]
+    #[doc = ""]
+    #[doc = "*This API requires the following crate features to be activated: `CanvasRenderingContext2d`*"]
+    pub fn round_rect_with_dom_point_init_sequence(
+        this: &CanvasRenderingContext2d,
+        x: f64,
+        y: f64,
+        w: f64,
+        h: f64,
+        radii: &::wasm_bindgen::JsValue,
+    ) -> Result<(), JsValue>;
+    # [wasm_bindgen (method , structural , js_class = "CanvasRenderingContext2D" , js_name = getLineDash)]
+    #[doc = "The `getLineDash()` method."]
+    #[doc = ""]
+    #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/getLineDash)"]
+    #[doc = ""]
+    #[doc = "*This API requires the following crate features to be activated: `CanvasRenderingContext2d`*"]
+    pub fn get_line_dash(this: &CanvasRenderingContext2d) -> ::js_sys::Array;
+    # [wasm_bindgen (catch , method , structural , js_class = "CanvasRenderingContext2D" , js_name = setLineDash)]
+    #[doc = "The `setLineDash()` method."]
+    #[doc = ""]
+    #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/setLineDash)"]
+    #[doc = ""]
+    #[doc = "*This API requires the following crate features to be activated: `CanvasRenderingContext2d`*"]
+    pub fn set_line_dash(
+        this: &CanvasRenderingContext2d,
+        segments: &::wasm_bindgen::JsValue,
+    ) -> Result<(), JsValue>;
     # [wasm_bindgen (method , structural , js_class = "CanvasRenderingContext2D" , js_name = clearRect)]
     #[doc = "The `clearRect()` method."]
     #[doc = ""]
@@ -1195,6 +1319,13 @@ extern "C" {
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `CanvasRenderingContext2d`*"]
     pub fn stroke_rect(this: &CanvasRenderingContext2d, x: f64, y: f64, w: f64, h: f64);
+    # [wasm_bindgen (method , structural , js_class = "CanvasRenderingContext2D" , js_name = reset)]
+    #[doc = "The `reset()` method."]
+    #[doc = ""]
+    #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/reset)"]
+    #[doc = ""]
+    #[doc = "*This API requires the following crate features to be activated: `CanvasRenderingContext2d`*"]
+    pub fn reset(this: &CanvasRenderingContext2d);
     # [wasm_bindgen (method , structural , js_class = "CanvasRenderingContext2D" , js_name = restore)]
     #[doc = "The `restore()` method."]
     #[doc = ""]
@@ -1313,6 +1444,26 @@ extern "C" {
         d: f64,
         e: f64,
         f: f64,
+    ) -> Result<(), JsValue>;
+    # [wasm_bindgen (catch , method , structural , js_class = "CanvasRenderingContext2D" , js_name = setTransform)]
+    #[doc = "The `setTransform()` method."]
+    #[doc = ""]
+    #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/setTransform)"]
+    #[doc = ""]
+    #[doc = "*This API requires the following crate features to be activated: `CanvasRenderingContext2d`*"]
+    pub fn set_transform_with_default_dom_matrix_2d_init(
+        this: &CanvasRenderingContext2d,
+    ) -> Result<(), JsValue>;
+    #[cfg(feature = "DomMatrix2dInit")]
+    # [wasm_bindgen (catch , method , structural , js_class = "CanvasRenderingContext2D" , js_name = setTransform)]
+    #[doc = "The `setTransform()` method."]
+    #[doc = ""]
+    #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/setTransform)"]
+    #[doc = ""]
+    #[doc = "*This API requires the following crate features to be activated: `CanvasRenderingContext2d`, `DomMatrix2dInit`*"]
+    pub fn set_transform_with_dom_matrix_2d_init(
+        this: &CanvasRenderingContext2d,
+        transform: &DomMatrix2dInit,
     ) -> Result<(), JsValue>;
     # [wasm_bindgen (catch , method , structural , js_class = "CanvasRenderingContext2D" , js_name = transform)]
     #[doc = "The `transform()` method."]

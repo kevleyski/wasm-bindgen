@@ -3,8 +3,12 @@
 //! Currently this is quite simple, rendering the same as the console tests in
 //! node.js. Output here is rendered in a `pre`, however.
 
+use alloc::format;
+use alloc::string::String;
 use js_sys::Error;
 use wasm_bindgen::prelude::*;
+
+use super::TestResult;
 
 /// Implementation of `Formatter` for browsers.
 ///
@@ -34,9 +38,8 @@ impl super::Formatter for Worker {
         write_output_line(JsValue::from(String::from(line)));
     }
 
-    fn log_test(&self, name: &str, result: &Result<(), JsValue>) {
-        let s = if result.is_ok() { "ok" } else { "FAIL" };
-        self.writeln(&format!("test {} ... {}", name, s));
+    fn log_test(&self, name: &str, result: &TestResult) {
+        self.writeln(&format!("test {} ... {}", name, result));
     }
 
     fn stringify_error(&self, err: &JsValue) -> String {

@@ -7,14 +7,14 @@
   </p>
 
   <p>
-    <a href="https://dev.azure.com/rustwasm/wasm-bindgen/_build/latest?definitionId=1&branchName=master"><img src="https://img.shields.io/azure-devops/build/rustwasm/wasm-bindgen/1.svg?style=flat-square" alt="Build Status" /></a>
+    <a href="https://github.com/rustwasm/wasm-bindgen/actions/workflows/main.yml?query=branch%3Amain"><img src="https://github.com/rustwasm/wasm-bindgen/actions/workflows/main.yml/badge.svg?branch=main" alt="Build Status" /></a>
     <a href="https://crates.io/crates/wasm-bindgen"><img src="https://img.shields.io/crates/v/wasm-bindgen.svg?style=flat-square" alt="Crates.io version" /></a>
     <a href="https://crates.io/crates/wasm-bindgen"><img src="https://img.shields.io/crates/d/wasm-bindgen.svg?style=flat-square" alt="Download" /></a>
     <a href="https://docs.rs/wasm-bindgen"><img src="https://img.shields.io/badge/docs-latest-blue.svg?style=flat-square" alt="docs.rs docs" /></a>
   </p>
 
   <h3>
-    <a href="https://rustwasm.github.io/docs/wasm-bindgen/">Guide</a>
+    <a href="https://rustwasm.github.io/wasm-bindgen/">Guide (main branch)</a>
     <span> | </span>
     <a href="https://docs.rs/wasm-bindgen">API Docs</a>
     <span> | </span>
@@ -25,6 +25,24 @@
 
   <sub>Built with 🦀🕸 by <a href="https://rustwasm.github.io/">The Rust and WebAssembly Working Group</a></sub>
 </div>
+
+## Install `wasm-bindgen-cli`
+
+You can install it using `cargo install`:
+
+```
+cargo install wasm-bindgen-cli
+```
+
+Or, you can download it from the
+[release page](https://github.com/rustwasm/wasm-bindgen/releases).
+
+If you have [`cargo-binstall`](https://crates.io/crates/cargo-binstall) installed,
+then you can install the pre-built artifacts by running:
+
+```
+cargo binstall wasm-bindgen-cli
+```
 
 ## Example
 
@@ -69,7 +87,7 @@ greet("World!");
 
 * **Designed with the ["Web IDL bindings" proposal][webidl-bindings] in mind.**
   Eventually, there won't be any JavaScript shims between Rust-generated wasm
-  functions and native DOM methods. Because the wasm functions are statically
+  functions and native DOM methods. Because the Wasm functions are statically
   type checked, some of those native methods' dynamic type checks should become
   unnecessary, promising to unlock even-faster-than-JavaScript DOM access.
 
@@ -89,6 +107,12 @@ You can find general documentation about using Rust and WebAssembly together
 - [js-sys](https://docs.rs/js-sys)
 - [web-sys](https://docs.rs/web-sys)
 - [wasm-bindgen-futures](https://docs.rs/wasm-bindgen-futures)
+
+## MSRV Policy
+
+Libraries that are released on [crates.io](https://crates.io) have a MSRV of v1.57. Changes to the MSRV will be accompanied by a minor version bump.
+
+CLI tools and their corresponding support libraries have a MSRV of v1.76. Changes to the MSRV will be accompanied by a patch version bump.
 
 ## License
 

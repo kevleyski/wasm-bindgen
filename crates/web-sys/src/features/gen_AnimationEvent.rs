@@ -1,4 +1,5 @@
 #![allow(unused_imports)]
+#![allow(clippy::all)]
 use super::*;
 use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
@@ -17,7 +18,7 @@ extern "C" {
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/AnimationEvent/animationName)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `AnimationEvent`*"]
-    pub fn animation_name(this: &AnimationEvent) -> String;
+    pub fn animation_name(this: &AnimationEvent) -> ::alloc::string::String;
     # [wasm_bindgen (structural , method , getter , js_class = "AnimationEvent" , js_name = elapsedTime)]
     #[doc = "Getter for the `elapsedTime` field of this object."]
     #[doc = ""]
@@ -31,7 +32,7 @@ extern "C" {
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/AnimationEvent/pseudoElement)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `AnimationEvent`*"]
-    pub fn pseudo_element(this: &AnimationEvent) -> String;
+    pub fn pseudo_element(this: &AnimationEvent) -> ::alloc::string::String;
     #[wasm_bindgen(catch, constructor, js_class = "AnimationEvent")]
     #[doc = "The `new AnimationEvent(..)` constructor, creating a new instance of `AnimationEvent`."]
     #[doc = ""]

@@ -1,4 +1,5 @@
 #![allow(unused_imports)]
+#![allow(clippy::all)]
 use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
 #[doc = "The `AuthenticatorTransport` enum."]
@@ -9,4 +10,5 @@ pub enum AuthenticatorTransport {
     Usb = "usb",
     Nfc = "nfc",
     Ble = "ble",
+    Internal = "internal",
 }

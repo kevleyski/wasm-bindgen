@@ -1,4 +1,5 @@
 #![allow(unused_imports)]
+#![allow(clippy::all)]
 use super::*;
 use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
@@ -41,7 +42,7 @@ extern "C" {
     #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/ServiceWorkerRegistration/scope)"]
     #[doc = ""]
     #[doc = "*This API requires the following crate features to be activated: `ServiceWorkerRegistration`*"]
-    pub fn scope(this: &ServiceWorkerRegistration) -> String;
+    pub fn scope(this: &ServiceWorkerRegistration) -> ::alloc::string::String;
     #[cfg(feature = "ServiceWorkerUpdateViaCache")]
     # [wasm_bindgen (structural , catch , method , getter , js_class = "ServiceWorkerRegistration" , js_name = updateViaCache)]
     #[doc = "Getter for the `updateViaCache` field of this object."]
@@ -82,17 +83,6 @@ extern "C" {
     #[doc = "*This API requires the following crate features to be activated: `ServiceWorkerRegistration`*"]
     pub fn get_notifications(
         this: &ServiceWorkerRegistration,
-    ) -> Result<::js_sys::Promise, JsValue>;
-    #[cfg(feature = "GetNotificationOptions")]
-    # [wasm_bindgen (catch , method , structural , js_class = "ServiceWorkerRegistration" , js_name = getNotifications)]
-    #[doc = "The `getNotifications()` method."]
-    #[doc = ""]
-    #[doc = "[MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/ServiceWorkerRegistration/getNotifications)"]
-    #[doc = ""]
-    #[doc = "*This API requires the following crate features to be activated: `GetNotificationOptions`, `ServiceWorkerRegistration`*"]
-    pub fn get_notifications_with_filter(
-        this: &ServiceWorkerRegistration,
-        filter: &GetNotificationOptions,
     ) -> Result<::js_sys::Promise, JsValue>;
     # [wasm_bindgen (catch , method , structural , js_class = "ServiceWorkerRegistration" , js_name = showNotification)]
     #[doc = "The `showNotification()` method."]

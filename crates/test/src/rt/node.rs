@@ -3,7 +3,11 @@
 //! This currently uses the same output as `libtest`, only reimplemented here
 //! for node itself.
 
+use alloc::format;
+use alloc::string::String;
 use wasm_bindgen::prelude::*;
+
+use super::TestResult;
 
 /// Implementation of the `Formatter` trait for node.js
 pub struct Node {}
@@ -15,6 +19,8 @@ extern "C" {
     type NodeError;
     #[wasm_bindgen(method, getter, js_class = "Error", structural)]
     fn stack(this: &NodeError) -> String;
+    #[wasm_bindgen(js_name = __wbgtest_og_console_log)]
+    fn og_console_log(s: &str);
 }
 
 impl Node {
@@ -26,12 +32,11 @@ impl Node {
 
 impl super::Formatter for Node {
     fn writeln(&self, line: &str) {
-        super::js_console_log(line);
+        og_console_log(line);
     }
 
-    fn log_test(&self, name: &str, result: &Result<(), JsValue>) {
-        let s = if result.is_ok() { "ok" } else { "FAIL" };
-        self.writeln(&format!("test {} ... {}", name, s));
+    fn log_test(&self, name: &str, result: &TestResult) {
+        self.writeln(&format!("test {} ... {}", name, result));
     }
 
     fn stringify_error(&self, err: &JsValue) -> String {

@@ -6,8 +6,8 @@
 // # Architecture of `wasm_bindgen_test`
 //
 // This module can seem a bit funky, but it's intended to be the runtime support
-// of the `#[wasm_bindgen_test]` macro and be amenable to executing wasm test
-// suites. The general idea is that for a wasm test binary there will be a set
+// of the `#[wasm_bindgen_test]` macro and be amenable to executing Wasm test
+// suites. The general idea is that for a Wasm test binary there will be a set
 // of functions tagged `#[wasm_bindgen_test]`. It's the job of the runtime
 // support to execute all of these functions, collecting and collating the
 // results.
@@ -22,11 +22,11 @@
 //
 // * First, the user runs `cargo test --target wasm32-unknown-unknown`
 //
-// * Cargo then compiles all the test suites (aka `tests/*.rs`) as wasm binaries
+// * Cargo then compiles all the test suites (aka `tests/*.rs`) as Wasm binaries
 //   (the `bin` crate type). These binaries all have entry points that are
 //   `main` functions, but it's actually not used. The binaries are also
 //   compiled with `--test`, which means they're linked to the standard `test`
-//   crate, but this crate doesn't work on wasm and so we bypass it entirely.
+//   crate, but this crate doesn't work on Wasm and so we bypass it entirely.
 //
 // * Instead of using `#[test]`, which doesn't work, users wrote tests with
 //   `#[wasm_bindgen_test]`. This macro expands to a bunch of `#[no_mangle]`
@@ -44,7 +44,7 @@
 //
 // * The `wasm-bindgen-test-runner` binary generates a JS entry point. This
 //   entry point creates a `Context` below. The runner binary also parses the
-//   wasm file and finds all functions that are named `__wbg_test_*`. The
+//   Wasm file and finds all functions that are named `__wbg_test_*`. The
 //   generate file gathers up all these functions into an array and then passes
 //   them to `Context` below. Note that these functions are passed as *JS
 //   values*.
@@ -61,7 +61,7 @@
 //   This is used for test filters today.
 //
 // * The `Context::run` function is called. Again, the generated JS has gathered
-//   all wasm tests to be executed into a list, and it's passed in here.
+//   all Wasm tests to be executed into a list, and it's passed in here.
 //
 // * Next, `Context::run` returns a `Promise` representing the eventual
 //   execution of all the tests. The Rust `Future` that's returned will work
@@ -87,14 +87,19 @@
 // Overall this is all somewhat in flux as it's pretty new, and feedback is
 // always of course welcome!
 
+use alloc::borrow::ToOwned;
+use alloc::boxed::Box;
+use alloc::format;
+use alloc::rc::Rc;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+use core::cell::{Cell, RefCell};
+use core::fmt::{self, Display};
+use core::future::Future;
+use core::pin::Pin;
+use core::task::{self, Poll};
 use js_sys::{Array, Function, Promise};
-use std::cell::{Cell, RefCell};
-use std::fmt;
-use std::future::Future;
-use std::pin::Pin;
-use std::rc::Rc;
-use std::sync::Once;
-use std::task::{self, Poll};
+pub use wasm_bindgen;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::future_to_promise;
 
@@ -109,6 +114,7 @@ const CONCURRENCY: usize = 1;
 pub mod browser;
 pub mod detect;
 pub mod node;
+mod scoped_tls;
 pub mod worker;
 
 /// Runtime test harness support instantiated in JS.
@@ -121,17 +127,17 @@ pub struct Context {
 }
 
 struct State {
-    /// An optional filter used to restrict which tests are actually executed
-    /// and which are ignored. This is passed via the `args` function which
-    /// comes from the command line of `wasm-bindgen-test-runner`. Currently
-    /// this is the only "CLI option"
-    filter: RefCell<Option<String>>,
+    /// Include ignored tests.
+    include_ignored: Cell<bool>,
 
     /// Counter of the number of tests that have succeeded.
-    succeeded: Cell<usize>,
+    succeeded_count: Cell<usize>,
 
-    /// Counter of the number of tests that have been ignored
-    ignored: Cell<usize>,
+    /// Number of tests that have been filtered.
+    filtered_count: Cell<usize>,
+
+    /// Number of tests that have been ignored.
+    ignored_count: Cell<usize>,
 
     /// A list of all tests which have failed.
     ///
@@ -150,6 +156,9 @@ struct State {
     /// How to actually format output, either node.js or browser-specific
     /// implementation.
     formatter: Box<dyn Formatter>,
+
+    /// Timing the total duration.
+    timer: Option<Timer>,
 }
 
 /// Failure reasons.
@@ -186,12 +195,38 @@ struct Output {
     should_panic: bool,
 }
 
+enum TestResult {
+    Ok,
+    Err(JsValue),
+    Ignored(Option<String>),
+}
+
+impl From<Result<(), JsValue>> for TestResult {
+    fn from(value: Result<(), JsValue>) -> Self {
+        match value {
+            Ok(()) => Self::Ok,
+            Err(err) => Self::Err(err),
+        }
+    }
+}
+
+impl Display for TestResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TestResult::Ok => write!(f, "ok"),
+            TestResult::Err(_) => write!(f, "FAIL"),
+            TestResult::Ignored(None) => write!(f, "ignored"),
+            TestResult::Ignored(Some(reason)) => write!(f, "ignored, {}", reason),
+        }
+    }
+}
+
 trait Formatter {
     /// Writes a line of output, typically status information.
     fn writeln(&self, line: &str);
 
     /// Log the result of a test, either passing or failing.
-    fn log_test(&self, name: &str, result: &Result<(), JsValue>);
+    fn log_test(&self, name: &str, result: &TestResult);
 
     /// Convert a thrown value into a string, using platform-specific apis
     /// perhaps to turn the error into a string.
@@ -204,14 +239,35 @@ extern "C" {
     #[doc(hidden)]
     pub fn js_console_log(s: &str);
 
+    #[wasm_bindgen(js_namespace = console, js_name = error)]
+    #[doc(hidden)]
+    pub fn js_console_error(s: &str);
+
     // General-purpose conversion into a `String`.
     #[wasm_bindgen(js_name = String)]
     fn stringify(val: &JsValue) -> String;
+
+    type Global;
+
+    #[wasm_bindgen(method, getter)]
+    fn performance(this: &Global) -> JsValue;
+
+    /// Type for the [`Performance` object](https://developer.mozilla.org/en-US/docs/Web/API/Performance).
+    type Performance;
+
+    /// Binding to [`Performance.now()`](https://developer.mozilla.org/en-US/docs/Web/API/Performance/now).
+    #[wasm_bindgen(method)]
+    fn now(this: &Performance) -> f64;
 }
 
 /// Internal implementation detail of the `console_log!` macro.
-pub fn log(args: &fmt::Arguments) {
+pub fn console_log(args: &fmt::Arguments) {
     js_console_log(&args.to_string());
+}
+
+/// Internal implementation detail of the `console_error!` macro.
+pub fn console_error(args: &fmt::Arguments) {
+    js_console_error(&args.to_string());
 }
 
 #[wasm_bindgen(js_class = WasmBindgenTestContext)]
@@ -223,20 +279,54 @@ impl Context {
     /// tests.
     #[wasm_bindgen(constructor)]
     pub fn new() -> Context {
-        static SET_HOOK: Once = Once::new();
+        fn panic_handling(mut message: String) {
+            let should_panic = CURRENT_OUTPUT.with(|output| {
+                let mut output = output.borrow_mut();
+                output.panic.push_str(&message);
+                output.should_panic
+            });
+
+            // See https://github.com/rustwasm/console_error_panic_hook/blob/4dc30a5448ed3ffcfb961b1ad54d000cca881b84/src/lib.rs#L83-L123.
+            if !should_panic {
+                #[wasm_bindgen]
+                extern "C" {
+                    type Error;
+
+                    #[wasm_bindgen(constructor)]
+                    fn new() -> Error;
+
+                    #[wasm_bindgen(method, getter)]
+                    fn stack(error: &Error) -> String;
+                }
+
+                message.push_str("\n\nStack:\n\n");
+                let e = Error::new();
+                let stack = e.stack();
+                message.push_str(&stack);
+
+                message.push_str("\n\n");
+
+                js_console_error(&message);
+            }
+        }
+        #[cfg(feature = "std")]
+        static SET_HOOK: std::sync::Once = std::sync::Once::new();
+        #[cfg(feature = "std")]
         SET_HOOK.call_once(|| {
             std::panic::set_hook(Box::new(|panic_info| {
-                let should_panic = CURRENT_OUTPUT.with(|output| {
-                    let mut output = output.borrow_mut();
-                    output.panic.push_str(&panic_info.to_string());
-                    output.should_panic
-                });
-
-                if !should_panic {
-                    console_error_panic_hook::hook(panic_info);
-                }
+                panic_handling(panic_info.to_string());
             }));
         });
+        #[cfg(all(
+            not(feature = "std"),
+            target_arch = "wasm32",
+            any(target_os = "unknown", target_os = "none")
+        ))]
+        #[panic_handler]
+        fn panic_handler(panic_info: &core::panic::PanicInfo<'_>) -> ! {
+            panic_handling(panic_info.to_string());
+            core::arch::wasm32::unreachable();
+        }
 
         let formatter = match detect::detect() {
             detect::Runtime::Browser => Box::new(browser::Browser::new()) as Box<dyn Formatter>,
@@ -244,40 +334,31 @@ impl Context {
             detect::Runtime::Worker => Box::new(worker::Worker::new()) as Box<dyn Formatter>,
         };
 
+        let timer = Timer::new();
+
         Context {
             state: Rc::new(State {
-                filter: Default::default(),
+                include_ignored: Default::default(),
                 failures: Default::default(),
-                ignored: Default::default(),
+                succeeded_count: Default::default(),
+                filtered_count: Default::default(),
+                ignored_count: Default::default(),
                 remaining: Default::default(),
                 running: Default::default(),
-                succeeded: Default::default(),
                 formatter,
+                timer,
             }),
         }
     }
 
-    /// Inform this context about runtime arguments passed to the test
-    /// harness.
-    ///
-    /// Eventually this will be used to support flags, but for now it's just
-    /// used to support test filters.
-    pub fn args(&mut self, args: Vec<JsValue>) {
-        // Here we want to reject all flags like `--foo` or `-f` as we don't
-        // support anything, and also we only support at most one non-flag
-        // argument as a test filter.
-        //
-        // Everything else is rejected.
-        let mut filter = self.state.filter.borrow_mut();
-        for arg in args {
-            let arg = arg.as_string().unwrap();
-            if arg.starts_with("-") {
-                panic!("flag {} not supported", arg);
-            } else if filter.is_some() {
-                panic!("more than one filter argument cannot be passed");
-            }
-            *filter = Some(arg);
-        }
+    /// Handle `--include-ignored` flag.
+    pub fn include_ignored(&mut self, include_ignored: bool) {
+        self.state.include_ignored.set(include_ignored);
+    }
+
+    /// Handle filter argument.
+    pub fn filtered_count(&mut self, filtered: usize) {
+        self.state.filtered_count.set(filtered);
     }
 
     /// Executes a list of tests, returning a promise representing their
@@ -294,9 +375,8 @@ impl Context {
         self.state
             .formatter
             .writeln(&format!("running {} {}", tests.len(), noun));
-        self.state.formatter.writeln("");
 
-        // Execute all our test functions through their wasm shims (unclear how
+        // Execute all our test functions through their Wasm shims (unclear how
         // to pass native function pointers around here). Each test will
         // execute one of the `execute_*` tests below which will push a
         // future onto our `remaining` list, which we'll process later.
@@ -324,7 +404,7 @@ impl Context {
     }
 }
 
-scoped_tls::scoped_thread_local!(static CURRENT_OUTPUT: RefCell<Output>);
+crate::scoped_thread_local!(static CURRENT_OUTPUT: RefCell<Output>);
 
 /// Handler for `console.log` invocations.
 ///
@@ -377,11 +457,11 @@ fn record(args: &Array, dst: impl FnOnce(&mut Output) -> &mut String) {
         let dst = dst(&mut out);
         args.for_each(&mut |val, idx, _array| {
             if idx != 0 {
-                dst.push_str(" ");
+                dst.push(' ');
             }
             dst.push_str(&stringify(&val));
         });
-        dst.push_str("\n");
+        dst.push('\n');
     });
 }
 
@@ -397,7 +477,7 @@ impl Termination for () {
     }
 }
 
-impl<E: std::fmt::Debug> Termination for Result<(), E> {
+impl<E: core::fmt::Debug> Termination for Result<(), E> {
     fn into_js_result(self) -> Result<(), JsValue> {
         self.map_err(|e| JsError::new(&format!("{:?}", e)).into())
     }
@@ -411,8 +491,9 @@ impl Context {
         name: &str,
         f: impl 'static + FnOnce() -> T,
         should_panic: Option<Option<&'static str>>,
+        ignore: Option<Option<&'static str>>,
     ) {
-        self.execute(name, async { f().into_js_result() }, should_panic);
+        self.execute(name, async { f().into_js_result() }, should_panic, ignore);
     }
 
     /// Entry point for an asynchronous in wasm. The
@@ -423,11 +504,17 @@ impl Context {
         name: &str,
         f: impl FnOnce() -> F + 'static,
         should_panic: Option<Option<&'static str>>,
+        ignore: Option<Option<&'static str>>,
     ) where
         F: Future + 'static,
         F::Output: Termination,
     {
-        self.execute(name, async { f().await.into_js_result() }, should_panic)
+        self.execute(
+            name,
+            async { f().await.into_js_result() },
+            should_panic,
+            ignore,
+        )
     }
 
     fn execute(
@@ -435,14 +522,19 @@ impl Context {
         name: &str,
         test: impl Future<Output = Result<(), JsValue>> + 'static,
         should_panic: Option<Option<&'static str>>,
+        ignore: Option<Option<&'static str>>,
     ) {
-        // If our test is filtered out, record that it was filtered and move
-        // on, nothing to do here.
-        let filter = self.state.filter.borrow();
-        if let Some(filter) = &*filter {
-            if !name.contains(filter) {
-                let ignored = self.state.ignored.get();
-                self.state.ignored.set(ignored + 1);
+        // Remove the crate name to mimic libtest more closely.
+        // This also removes our `__wbgt_` prefix and the `ignored` and `should_panic` modifiers.
+        let name = name.split_once("::").unwrap().1;
+
+        if let Some(ignore) = ignore {
+            if !self.state.include_ignored.get() {
+                self.state
+                    .formatter
+                    .log_test(name, &TestResult::Ignored(ignore.map(str::to_owned)));
+                let ignored = self.state.ignored_count.get();
+                self.state.ignored_count.set(ignored + 1);
                 return;
             }
         }
@@ -484,7 +576,7 @@ impl Future for ExecuteTests {
                 Poll::Pending => continue,
             };
             let test = running.remove(i);
-            self.0.log_test_result(test, result);
+            self.0.log_test_result(test, result.into());
         }
 
         // Next up, try to schedule as many tests as we can. Once we get a test
@@ -503,7 +595,7 @@ impl Future for ExecuteTests {
                     continue;
                 }
             };
-            self.0.log_test_result(test, result);
+            self.0.log_test_result(test, result.into());
         }
 
         // Tests are still executing, we're registered to get a notification,
@@ -523,14 +615,15 @@ impl Future for ExecuteTests {
 }
 
 impl State {
-    fn log_test_result(&self, test: Test, result: Result<(), JsValue>) {
+    fn log_test_result(&self, test: Test, result: TestResult) {
         // Save off the test for later processing when we print the final
         // results.
         if let Some(should_panic) = test.should_panic {
-            if let Err(e) = result {
+            if let TestResult::Err(_e) = result {
                 if let Some(expected) = should_panic {
                     if !test.output.borrow().panic.contains(expected) {
-                        self.formatter.log_test(&test.name, &Err(JsValue::NULL));
+                        self.formatter
+                            .log_test(&test.name, &TestResult::Err(JsValue::NULL));
                         self.failures
                             .borrow_mut()
                             .push((test, Failure::ShouldPanicExpected));
@@ -538,10 +631,11 @@ impl State {
                     }
                 }
 
-                self.formatter.log_test(&test.name, &Ok(()));
-                self.succeeded.set(self.succeeded.get() + 1);
+                self.formatter.log_test(&test.name, &TestResult::Ok);
+                self.succeeded_count.set(self.succeeded_count.get() + 1);
             } else {
-                self.formatter.log_test(&test.name, &Err(JsValue::NULL));
+                self.formatter
+                    .log_test(&test.name, &TestResult::Err(JsValue::NULL));
                 self.failures
                     .borrow_mut()
                     .push((test, Failure::ShouldPanic));
@@ -550,8 +644,9 @@ impl State {
             self.formatter.log_test(&test.name, &result);
 
             match result {
-                Ok(()) => self.succeeded.set(self.succeeded.get() + 1),
-                Err(e) => self.failures.borrow_mut().push((test, Failure::Error(e))),
+                TestResult::Ok => self.succeeded_count.set(self.succeeded_count.get() + 1),
+                TestResult::Err(e) => self.failures.borrow_mut().push((test, Failure::Error(e))),
+                _ => (),
             }
         }
     }
@@ -568,16 +663,25 @@ impl State {
                 self.formatter.writeln(&format!("    {}", test.name));
             }
         }
+        let finished_in = if let Some(timer) = &self.timer {
+            format!("; finished in {:.2?}s", timer.elapsed())
+        } else {
+            String::new()
+        };
         self.formatter.writeln("");
         self.formatter.writeln(&format!(
             "test result: {}. \
              {} passed; \
              {} failed; \
-             {} ignored\n",
+             {} ignored; \
+             {} filtered out\
+             {}\n",
             if failures.len() == 0 { "ok" } else { "FAILED" },
-            self.succeeded.get(),
+            self.succeeded_count.get(),
             failures.len(),
-            self.ignored.get(),
+            self.ignored_count.get(),
+            self.filtered_count.get(),
+            finished_in,
         ));
     }
 
@@ -621,7 +725,7 @@ impl State {
 
         if let Failure::Error(error) = failure {
             logs.push_str("JS exception that was thrown:\n");
-            let error_string = self.formatter.stringify_error(&error);
+            let error_string = self.formatter.stringify_error(error);
             logs.push_str(&tab(&error_string));
         }
 
@@ -639,7 +743,7 @@ impl State {
 ///   variable to capture output for the current test. That way at least when
 ///   we've got Rust code running we'll be able to capture output.
 ///
-/// * Next, this "catches panics". Right now all wasm code is configured as
+/// * Next, this "catches panics". Right now all Wasm code is configured as
 ///   panic=abort, but it's more like an exception in JS. It's pretty sketchy
 ///   to actually continue executing Rust code after an "abort", but we don't
 ///   have much of a choice for now.
@@ -698,7 +802,31 @@ fn tab(s: &str) -> String {
     for line in s.lines() {
         result.push_str("    ");
         result.push_str(line);
-        result.push_str("\n");
+        result.push('\n');
     }
-    return result;
+    result
+}
+
+struct Timer {
+    performance: Performance,
+    started: f64,
+}
+
+impl Timer {
+    fn new() -> Option<Self> {
+        let global: Global = js_sys::global().unchecked_into();
+        let performance = global.performance();
+        (!performance.is_undefined()).then(|| {
+            let performance: Performance = performance.unchecked_into();
+            let started = performance.now();
+            Self {
+                performance,
+                started,
+            }
+        })
+    }
+
+    fn elapsed(&self) -> f64 {
+        (self.performance.now() - self.started) / 1000.
+    }
 }

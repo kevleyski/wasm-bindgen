@@ -19,7 +19,7 @@ interface XULControllers;
 interface HTMLTextAreaElement : HTMLElement {
   [CEReactions, SetterThrows, Pure]
            attribute DOMString autocomplete;
-  [CEReactions, SetterThrows, Pure]
+  [CEReactions, SetterThrows, Pure, RustDeprecated="Use `HtmlElement::autofocus()` or `HtmlElement::set_autofocus()` instead."]
            attribute boolean autofocus;
   [CEReactions, SetterThrows, Pure]
            attribute unsigned long cols;
@@ -74,7 +74,7 @@ interface HTMLTextAreaElement : HTMLElement {
   undefined setRangeText(DOMString replacement);
   [Throws]
   undefined setRangeText(DOMString replacement, unsigned long start,
-    unsigned long end, optional SelectionMode selectionMode = "preserve");
+    unsigned long end, optional DOMString mode);
   [Throws]
   undefined setSelectionRange(unsigned long start, unsigned long end, optional DOMString direction);
 };

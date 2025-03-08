@@ -17,17 +17,24 @@
 //! bindings.
 
 #![doc(html_root_url = "https://docs.rs/js-sys/0.2")]
+#![cfg_attr(not(feature = "std"), no_std)]
+#![cfg_attr(target_feature = "atomics", feature(thread_local))]
 
+extern crate alloc;
+
+use alloc::string::String;
+use alloc::vec::Vec;
+use core::cmp::Ordering;
+use core::convert::{self, Infallible, TryFrom};
+use core::f64;
+use core::fmt;
+use core::iter::{self, Product, Sum};
+use core::mem::{self, MaybeUninit};
 use core::ops::{Add, BitAnd, BitOr, BitXor, Div, Mul, Neg, Not, Rem, Shl, Shr, Sub};
-use std::cmp::Ordering;
-use std::convert::{self, Infallible, TryFrom};
-use std::f64;
-use std::fmt;
-use std::iter::{self, Product, Sum};
-use std::mem;
-use std::str;
-use std::str::FromStr;
+use core::str;
+use core::str::FromStr;
 
+pub use wasm_bindgen;
 use wasm_bindgen::prelude::*;
 
 // When adding new imports:
@@ -380,6 +387,28 @@ extern "C" {
     #[wasm_bindgen(method, js_name = findIndex)]
     pub fn find_index(this: &Array, predicate: &mut dyn FnMut(JsValue, u32, Array) -> bool) -> i32;
 
+    /// The `findLast()` method of Array instances iterates the array in reverse order
+    /// and returns the value of the first element that satisfies the provided testing function.
+    /// If no elements satisfy the testing function, undefined is returned.
+    ///
+    /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/findLast)
+    #[wasm_bindgen(method, js_name = findLast)]
+    pub fn find_last(
+        this: &Array,
+        predicate: &mut dyn FnMut(JsValue, u32, Array) -> bool,
+    ) -> JsValue;
+
+    /// The `findLastIndex()` method of Array instances iterates the array in reverse order
+    /// and returns the index of the first element that satisfies the provided testing function.
+    /// If no elements satisfy the testing function, -1 is returned.
+    ///
+    /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/findLastIndex)
+    #[wasm_bindgen(method, js_name = findLastIndex)]
+    pub fn find_last_index(
+        this: &Array,
+        predicate: &mut dyn FnMut(JsValue, u32, Array) -> bool,
+    ) -> i32;
+
     /// The `flat()` method creates a new array with all sub-array elements concatenated into it
     /// recursively up to the specified depth.
     ///
@@ -610,14 +639,14 @@ extern "C" {
     pub fn unshift(this: &Array, value: &JsValue) -> u32;
 }
 
-/// Iterator returned by `Array::iter`
+/// Iterator returned by `Array::into_iter`
 #[derive(Debug, Clone)]
-pub struct ArrayIter<'a> {
-    range: std::ops::Range<u32>,
-    array: &'a Array,
+pub struct ArrayIntoIter {
+    range: core::ops::Range<u32>,
+    array: Array,
 }
 
-impl<'a> std::iter::Iterator for ArrayIter<'a> {
+impl core::iter::Iterator for ArrayIntoIter {
     type Item = JsValue;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -629,18 +658,102 @@ impl<'a> std::iter::Iterator for ArrayIter<'a> {
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.range.size_hint()
     }
+
+    #[inline]
+    fn count(self) -> usize
+    where
+        Self: Sized,
+    {
+        self.range.count()
+    }
+
+    #[inline]
+    fn last(self) -> Option<Self::Item>
+    where
+        Self: Sized,
+    {
+        let Self { range, array } = self;
+        range.last().map(|index| array.get(index))
+    }
+
+    #[inline]
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        self.range.nth(n).map(|index| self.array.get(index))
+    }
 }
 
-impl<'a> std::iter::DoubleEndedIterator for ArrayIter<'a> {
+impl core::iter::DoubleEndedIterator for ArrayIntoIter {
     fn next_back(&mut self) -> Option<Self::Item> {
         let index = self.range.next_back()?;
         Some(self.array.get(index))
     }
+
+    fn nth_back(&mut self, n: usize) -> Option<Self::Item> {
+        self.range.nth_back(n).map(|index| self.array.get(index))
+    }
 }
 
-impl<'a> std::iter::FusedIterator for ArrayIter<'a> {}
+impl core::iter::FusedIterator for ArrayIntoIter {}
 
-impl<'a> std::iter::ExactSizeIterator for ArrayIter<'a> {}
+impl core::iter::ExactSizeIterator for ArrayIntoIter {}
+
+/// Iterator returned by `Array::iter`
+#[derive(Debug, Clone)]
+pub struct ArrayIter<'a> {
+    range: core::ops::Range<u32>,
+    array: &'a Array,
+}
+
+impl core::iter::Iterator for ArrayIter<'_> {
+    type Item = JsValue;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let index = self.range.next()?;
+        Some(self.array.get(index))
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.range.size_hint()
+    }
+
+    #[inline]
+    fn count(self) -> usize
+    where
+        Self: Sized,
+    {
+        self.range.count()
+    }
+
+    #[inline]
+    fn last(self) -> Option<Self::Item>
+    where
+        Self: Sized,
+    {
+        let Self { range, array } = self;
+        range.last().map(|index| array.get(index))
+    }
+
+    #[inline]
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        self.range.nth(n).map(|index| self.array.get(index))
+    }
+}
+
+impl core::iter::DoubleEndedIterator for ArrayIter<'_> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        let index = self.range.next_back()?;
+        Some(self.array.get(index))
+    }
+
+    fn nth_back(&mut self, n: usize) -> Option<Self::Item> {
+        self.range.nth_back(n).map(|index| self.array.get(index))
+    }
+}
+
+impl core::iter::FusedIterator for ArrayIter<'_> {}
+
+impl core::iter::ExactSizeIterator for ArrayIter<'_> {}
 
 impl Array {
     /// Returns an iterator over the values of the JS array.
@@ -665,8 +778,20 @@ impl Array {
     }
 }
 
+impl core::iter::IntoIterator for Array {
+    type Item = JsValue;
+    type IntoIter = ArrayIntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        ArrayIntoIter {
+            range: 0..self.length(),
+            array: self,
+        }
+    }
+}
+
 // TODO pre-initialize the Array with the correct length using TrustedLen
-impl<A> std::iter::FromIterator<A> for Array
+impl<A> core::iter::FromIterator<A> for Array
 where
     A: AsRef<JsValue>,
 {
@@ -680,7 +805,7 @@ where
     }
 }
 
-impl<A> std::iter::Extend<A> for Array
+impl<A> core::iter::Extend<A> for Array
 where
     A: AsRef<JsValue>,
 {
@@ -1051,32 +1176,32 @@ pub mod Atomics {
         /// Note: This operation only works with a shared `Int32Array`
         /// and may not be allowed on the main thread.
         ///
-        /// You should use `wait_bigint` to operate on a `BigInt64Array` or a `BigUint64Array`.
+        /// You should use `wait_bigint` to operate on a `BigInt64Array`.
         ///
         /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Atomics/wait)
         #[wasm_bindgen(js_namespace = Atomics, catch)]
         pub fn wait(typed_array: &Int32Array, index: u32, value: i32) -> Result<JsString, JsValue>;
 
         /// The static `Atomics.wait()` method verifies that a given
-        /// position in an `Int32Array` still contains a given value
+        /// position in an `BigInt64Array` still contains a given value
         /// and if so sleeps, awaiting a wakeup or a timeout.
         /// It returns a string which is either "ok", "not-equal", or "timed-out".
-        /// Note: This operation only works with a shared `Int32Array`
+        /// Note: This operation only works with a shared `BigInt64Array`
         /// and may not be allowed on the main thread.
         ///
-        /// This method is used to operate on a `BigInt64Array` or a `BigUint64Array`.
+        /// You should use `wait` to operate on a `Int32Array`.
         ///
         /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Atomics/wait)
         #[wasm_bindgen(js_namespace = Atomics, catch, js_name = wait)]
         pub fn wait_bigint(
-            typed_array: &Int32Array,
+            typed_array: &BigInt64Array,
             index: u32,
             value: i64,
         ) -> Result<JsString, JsValue>;
 
         /// Like `wait()`, but with timeout
         ///
-        /// You should use `wait_with_timeout_bigint` to operate on a `BigInt64Array` or a `BigUint64Array`.
+        /// You should use `wait_with_timeout_bigint` to operate on a `BigInt64Array`.
         ///
         /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Atomics/wait)
         #[wasm_bindgen(js_namespace = Atomics, catch, js_name = wait)]
@@ -1089,16 +1214,80 @@ pub mod Atomics {
 
         /// Like `wait()`, but with timeout
         ///
-        /// This method is used to operate on a `BigInt64Array` or a `BigUint64Array`.
+        /// You should use `wait_with_timeout` to operate on a `Int32Array`.
         ///
         /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Atomics/wait)
         #[wasm_bindgen(js_namespace = Atomics, catch, js_name = wait)]
         pub fn wait_with_timeout_bigint(
-            typed_array: &Int32Array,
+            typed_array: &BigInt64Array,
             index: u32,
             value: i64,
             timeout: f64,
         ) -> Result<JsString, JsValue>;
+
+        /// The static `Atomics.waitAsync()` method verifies that a given position in an
+        /// `Int32Array` still contains a given value and if so sleeps, awaiting a
+        /// wakeup or a timeout. It returns an object with two properties. The first
+        /// property `async` is a boolean which if true indicates that the second
+        /// property `value` is a promise. If `async` is false then value is a string
+        /// whether equal to either "not-equal" or "timed-out".
+        /// Note: This operation only works with a shared `Int32Array` and may be used
+        /// on the main thread.
+        ///
+        /// You should use `wait_async_bigint` to operate on a `BigInt64Array`.
+        ///
+        /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Atomics/waitAsync)
+        #[wasm_bindgen(js_namespace = Atomics, catch, js_name = waitAsync)]
+        pub fn wait_async(
+            typed_array: &Int32Array,
+            index: u32,
+            value: i32,
+        ) -> Result<Object, JsValue>;
+
+        /// The static `Atomics.waitAsync()` method verifies that a given position in an
+        /// `Int32Array` still contains a given value and if so sleeps, awaiting a
+        /// wakeup or a timeout. It returns an object with two properties. The first
+        /// property `async` is a boolean which if true indicates that the second
+        /// property `value` is a promise. If `async` is false then value is a string
+        /// whether equal to either "not-equal" or "timed-out".
+        /// Note: This operation only works with a shared `BigInt64Array` and may be used
+        /// on the main thread.
+        ///
+        /// You should use `wait_async` to operate on a `Int32Array`.
+        ///
+        /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Atomics/waitAsync)
+        #[wasm_bindgen(js_namespace = Atomics, catch, js_name = waitAsync)]
+        pub fn wait_async_bigint(
+            typed_array: &BigInt64Array,
+            index: u32,
+            value: i64,
+        ) -> Result<Object, JsValue>;
+
+        /// Like `waitAsync()`, but with timeout
+        ///
+        /// You should use `wait_async_with_timeout_bigint` to operate on a `BigInt64Array`.
+        ///
+        /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Atomics/waitAsync)
+        #[wasm_bindgen(js_namespace = Atomics, catch, js_name = waitAsync)]
+        pub fn wait_async_with_timeout(
+            typed_array: &Int32Array,
+            index: u32,
+            value: i32,
+            timeout: f64,
+        ) -> Result<Object, JsValue>;
+
+        /// Like `waitAsync()`, but with timeout
+        ///
+        /// You should use `wait_async_with_timeout` to operate on a `Int32Array`.
+        ///
+        /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Atomics/waitAsync)
+        #[wasm_bindgen(js_namespace = Atomics, catch, js_name = waitAsync)]
+        pub fn wait_async_with_timeout_bigint(
+            typed_array: &BigInt64Array,
+            index: u32,
+            value: i64,
+            timeout: f64,
+        ) -> Result<Object, JsValue>;
 
         /// The static `Atomics.xor()` method computes a bitwise XOR
         /// with a given value at a given position in the array,
@@ -1203,6 +1392,16 @@ impl BigInt {
         JsValue::as_ref(self)
             .pow(JsValue::as_ref(rhs))
             .unchecked_into()
+    }
+
+    /// Returns a tuple of this [`BigInt`]'s absolute value along with a
+    /// [`bool`] indicating whether the [`BigInt`] was negative.
+    fn abs(&self) -> (Self, bool) {
+        if self < &BigInt::from(0) {
+            (-self, true)
+        } else {
+            (self.clone(), false)
+        }
     }
 }
 
@@ -1310,41 +1509,42 @@ impl fmt::Debug for BigInt {
 impl fmt::Display for BigInt {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.pad_integral(self >= &BigInt::from(0), "", &self.to_string_unchecked(10))
+        let (abs, is_neg) = self.abs();
+        f.pad_integral(!is_neg, "", &abs.to_string_unchecked(10))
     }
 }
 
 impl fmt::Binary for BigInt {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.pad_integral(self >= &BigInt::from(0), "0b", &self.to_string_unchecked(2))
+        let (abs, is_neg) = self.abs();
+        f.pad_integral(!is_neg, "0b", &abs.to_string_unchecked(2))
     }
 }
 
 impl fmt::Octal for BigInt {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.pad_integral(self >= &BigInt::from(0), "0o", &self.to_string_unchecked(8))
+        let (abs, is_neg) = self.abs();
+        f.pad_integral(!is_neg, "0o", &abs.to_string_unchecked(8))
     }
 }
 
 impl fmt::LowerHex for BigInt {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.pad_integral(
-            self >= &BigInt::from(0),
-            "0x",
-            &self.to_string_unchecked(16),
-        )
+        let (abs, is_neg) = self.abs();
+        f.pad_integral(!is_neg, "0x", &abs.to_string_unchecked(16))
     }
 }
 
 impl fmt::UpperHex for BigInt {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut s: String = self.to_string_unchecked(16);
+        let (abs, is_neg) = self.abs();
+        let mut s: String = abs.to_string_unchecked(16);
         s.make_ascii_uppercase();
-        f.pad_integral(self >= &BigInt::from(0), "0x", &s)
+        f.pad_integral(!is_neg, "0x", &s)
     }
 }
 
@@ -1436,6 +1636,18 @@ extern "C" {
     /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView)
     #[wasm_bindgen(constructor)]
     pub fn new(buffer: &ArrayBuffer, byteOffset: usize, byteLength: usize) -> DataView;
+
+    /// The `DataView` view provides a low-level interface for reading and
+    /// writing multiple number types in an `ArrayBuffer` irrespective of the
+    /// platform's endianness.
+    ///
+    /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView)
+    #[wasm_bindgen(constructor)]
+    pub fn new_with_shared_array_buffer(
+        buffer: &SharedArrayBuffer,
+        byteOffset: usize,
+        byteLength: usize,
+    ) -> DataView;
 
     /// The ArrayBuffer referenced by this view. Fixed at construction time and thus read only.
     ///
@@ -2096,7 +2308,7 @@ impl<'a> IntoIterator for &'a Iterator {
     }
 }
 
-impl<'a> std::iter::Iterator for Iter<'a> {
+impl core::iter::Iterator for Iter<'_> {
     type Item = Result<JsValue, JsValue>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -2116,7 +2328,7 @@ impl IntoIterator for Iterator {
     }
 }
 
-impl std::iter::Iterator for IntoIter {
+impl core::iter::Iterator for IntoIter {
     type Item = Result<JsValue, JsValue>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -2567,7 +2779,7 @@ impl Number {
     /// (without actually being zero).
     ///
     /// [MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/MIN_VALUE)
-    // Cannot use f64::MIN_POSITIVE since that is the smallest **normal** postitive number.
+    // Cannot use f64::MIN_POSITIVE since that is the smallest **normal** positive number.
     pub const MIN_VALUE: f64 = 5E-324;
     /// Special "Not a Number" value.
     ///
@@ -2619,6 +2831,38 @@ macro_rules! number_from {
     )*)
 }
 number_from!(i8 u8 i16 u16 i32 u32 f32 f64);
+
+/// The error type returned when a checked integral type conversion fails.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct TryFromIntError(());
+
+impl fmt::Display for TryFromIntError {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt.write_str("out of range integral type conversion attempted")
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for TryFromIntError {}
+
+macro_rules! number_try_from {
+    ($($x:ident)*) => ($(
+        impl TryFrom<$x> for Number {
+            type Error = TryFromIntError;
+
+            #[inline]
+            fn try_from(x: $x) -> Result<Number, Self::Error> {
+                let x_f64 = x as f64;
+                if (Number::MIN_SAFE_INTEGER..=Number::MAX_SAFE_INTEGER).contains(&x_f64) {
+                    Ok(Number::from(x_f64))
+                } else {
+                    Err(TryFromIntError(()))
+                }
+            }
+        }
+    )*)
+}
+number_try_from!(i64 u64 i128 u128);
 
 // TODO: add this on the next major version, when blanket impl is removed
 /*
@@ -3147,6 +3391,13 @@ extern "C" {
     /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/toLocaleTimeString)
     #[wasm_bindgen(method, js_name = toLocaleTimeString)]
     pub fn to_locale_time_string(this: &Date, locale: &str) -> JsString;
+
+    #[wasm_bindgen(method, js_name = toLocaleTimeString)]
+    pub fn to_locale_time_string_with_options(
+        this: &Date,
+        locale: &str,
+        options: &JsValue,
+    ) -> JsString;
 
     /// The `toString()` method returns a string representing
     /// the specified Date object.
@@ -4169,7 +4420,7 @@ pub mod WebAssembly {
         /// The `WebAssembly.instantiateStreaming()` function compiles and
         /// instantiates a WebAssembly module directly from a streamed
         /// underlying source. This is the most efficient, optimized way to load
-        /// wasm code.
+        /// Wasm code.
         ///
         /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WebAssembly/instantiateStreaming)
         #[wasm_bindgen(js_namespace = WebAssembly, js_name = instantiateStreaming)]
@@ -4177,7 +4428,7 @@ pub mod WebAssembly {
 
         /// The `WebAssembly.validate()` function validates a given typed
         /// array of WebAssembly binary code, returning whether the bytes
-        /// form a valid wasm module (`true`) or not (`false`).
+        /// form a valid Wasm module (`true`) or not (`false`).
         ///
         /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WebAssembly/validate)
         #[wasm_bindgen(js_namespace = WebAssembly, catch)]
@@ -4369,6 +4620,64 @@ pub mod WebAssembly {
         /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WebAssembly/Table/set)
         #[wasm_bindgen(method, catch, js_namespace = WebAssembly)]
         pub fn set(this: &Table, index: u32, function: &Function) -> Result<(), JsValue>;
+    }
+
+    // WebAssembly.Tag
+    #[wasm_bindgen]
+    extern "C" {
+        /// The `WebAssembly.Tag()` constructor creates a new `Tag` object
+        ///
+        /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WebAssembly/Tag)
+        #[wasm_bindgen(js_namespace = WebAssembly, extends = Object, typescript_type = "WebAssembly.Tag")]
+        #[derive(Clone, Debug, PartialEq, Eq)]
+        pub type Tag;
+
+        /// The `WebAssembly.Tag()` constructor creates a new `Tag` object
+        ///
+        /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WebAssembly/Tag)
+        #[wasm_bindgen(constructor, js_namespace = WebAssembly, catch)]
+        pub fn new(tag_descriptor: &Object) -> Result<Tag, JsValue>;
+    }
+
+    // WebAssembly.Exception
+    #[wasm_bindgen]
+    extern "C" {
+        /// The `WebAssembly.Exception()` constructor creates a new `Exception` object
+        ///
+        /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WebAssembly/Exception)
+        #[wasm_bindgen(js_namespace = WebAssembly, extends = Object, typescript_type = "WebAssembly.Exception")]
+        #[derive(Clone, Debug, PartialEq, Eq)]
+        pub type Exception;
+
+        /// The `WebAssembly.Exception()` constructor creates a new `Exception` object
+        ///
+        /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WebAssembly/Exception)
+        #[wasm_bindgen(constructor, js_namespace = WebAssembly, catch)]
+        pub fn new(tag: &Tag, payload: &Array) -> Result<Exception, JsValue>;
+
+        /// The `WebAssembly.Exception()` constructor creates a new `Exception` object
+        ///
+        /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WebAssembly/Exception)
+        #[wasm_bindgen(constructor, js_namespace = WebAssembly, catch)]
+        pub fn new_with_options(
+            tag: &Tag,
+            payload: &Array,
+            options: &Object,
+        ) -> Result<Exception, JsValue>;
+
+        /// The `is()` prototype method of the `WebAssembly.Exception` can be used to
+        /// test if the Exception matches a given tag.
+        ///
+        /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WebAssembly/Exception/is)
+        #[wasm_bindgen(method, js_namespace = WebAssembly)]
+        pub fn is(this: &Exception, tag: &Tag) -> bool;
+
+        /// The `getArg()` prototype method of the `WebAssembly.Exception` can be used
+        /// to get the value of a specified item in the exception's data arguments
+        ///
+        /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WebAssembly/Exception/getArg)
+        #[wasm_bindgen(method, js_namespace = WebAssembly, js_name = getArg, catch)]
+        pub fn get_arg(this: &Exception, tag: &Tag, index: u32) -> Result<JsValue, JsValue>;
     }
 
     // WebAssembly.Global
@@ -5045,7 +5354,7 @@ impl JsString {
     ///
     /// [docs]: https://rustwasm.github.io/docs/wasm-bindgen/reference/types/str.html
     pub fn is_valid_utf16(&self) -> bool {
-        std::char::decode_utf16(self.iter()).all(|i| i.is_ok())
+        core::char::decode_utf16(self.iter()).all(|i| i.is_ok())
     }
 
     /// Returns an iterator over the `u16` character codes that make up this JS
@@ -5053,9 +5362,9 @@ impl JsString {
     ///
     /// This method will call `char_code_at` for each code in this JS string,
     /// returning an iterator of the codes in sequence.
-    pub fn iter<'a>(
-        &'a self,
-    ) -> impl ExactSizeIterator<Item = u16> + DoubleEndedIterator<Item = u16> + 'a {
+    pub fn iter(
+        &self,
+    ) -> impl ExactSizeIterator<Item = u16> + DoubleEndedIterator<Item = u16> + '_ {
         (0..self.length()).map(move |i| self.char_code_at(i) as u16)
     }
 
@@ -5080,7 +5389,7 @@ impl JsString {
         // https://github.com/rustwasm/wasm-bindgen/issues/1362
         let cp = self.code_point_at(0).as_f64().unwrap_throw() as u32;
 
-        let c = std::char::from_u32(cp)?;
+        let c = core::char::from_u32(cp)?;
 
         if c.len_utf16() as u32 == len {
             Some(c)
@@ -5091,6 +5400,7 @@ impl JsString {
 }
 
 impl PartialEq<str> for JsString {
+    #[allow(clippy::cmp_owned)] // prevent infinite recursion
     fn eq(&self, other: &str) -> bool {
         String::from(self) == other
     }
@@ -5725,19 +6035,22 @@ extern "C" {
 /// This allows access to the global properties and global names by accessing
 /// the `Object` returned.
 pub fn global() -> Object {
-    thread_local!(static GLOBAL: Object = get_global_object());
+    use once_cell::unsync::Lazy;
 
-    return GLOBAL.with(|g| g.clone());
+    struct Wrapper<T>(Lazy<T>);
+
+    #[cfg(not(target_feature = "atomics"))]
+    unsafe impl<T> Sync for Wrapper<T> {}
+
+    #[cfg(not(target_feature = "atomics"))]
+    unsafe impl<T> Send for Wrapper<T> {}
+
+    #[cfg_attr(target_feature = "atomics", thread_local)]
+    static GLOBAL: Wrapper<Object> = Wrapper(Lazy::new(get_global_object));
+
+    return GLOBAL.0.clone();
 
     fn get_global_object() -> Object {
-        // This is a bit wonky, but we're basically using `#[wasm_bindgen]`
-        // attributes to synthesize imports so we can access properties of the
-        // form:
-        //
-        // * `globalThis.globalThis`
-        // * `self.self`
-        // * ... (etc)
-        //
         // Accessing the global object is not an easy thing to do, and what we
         // basically want is `globalThis` but we can't rely on that existing
         // everywhere. In the meantime we've got the fallbacks mentioned in:
@@ -5751,26 +6064,27 @@ pub fn global() -> Object {
         extern "C" {
             type Global;
 
-            #[wasm_bindgen(getter, catch, static_method_of = Global, js_class = globalThis, js_name = globalThis)]
-            fn get_global_this() -> Result<Object, JsValue>;
+            #[wasm_bindgen(thread_local_v2, js_name = globalThis)]
+            static GLOBAL_THIS: Option<Object>;
 
-            #[wasm_bindgen(getter, catch, static_method_of = Global, js_class = self, js_name = self)]
-            fn get_self() -> Result<Object, JsValue>;
+            #[wasm_bindgen(thread_local_v2, js_name = self)]
+            static SELF: Option<Object>;
 
-            #[wasm_bindgen(getter, catch, static_method_of = Global, js_class = window, js_name = window)]
-            fn get_window() -> Result<Object, JsValue>;
+            #[wasm_bindgen(thread_local_v2, js_name = window)]
+            static WINDOW: Option<Object>;
 
-            #[wasm_bindgen(getter, catch, static_method_of = Global, js_class = global, js_name = global)]
-            fn get_global() -> Result<Object, JsValue>;
+            #[wasm_bindgen(thread_local_v2, js_name = global)]
+            static GLOBAL: Option<Object>;
         }
 
         // The order is important: in Firefox Extension Content Scripts `globalThis`
         // is a Sandbox (not Window), so `globalThis` must be checked after `window`.
-        let static_object = Global::get_self()
-            .or_else(|_| Global::get_window())
-            .or_else(|_| Global::get_global_this())
-            .or_else(|_| Global::get_global());
-        if let Ok(obj) = static_object {
+        let static_object = SELF
+            .with(Option::clone)
+            .or_else(|| WINDOW.with(Option::clone))
+            .or_else(|| GLOBAL_THIS.with(Option::clone))
+            .or_else(|| GLOBAL.with(Option::clone));
+        if let Some(obj) = static_object {
             if !obj.is_undefined() {
                 return obj;
             }
@@ -5911,6 +6225,13 @@ macro_rules! arrays {
             #[wasm_bindgen(method)]
             pub fn at(this: &$name, idx: i32) -> Option<$ty>;
 
+            /// The `copyWithin()` method shallow copies part of a typed array to another
+            /// location in the same typed array and returns it, without modifying its size.
+            ///
+            /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/copyWithin)
+            #[wasm_bindgen(method, js_name = copyWithin)]
+            pub fn copy_within(this: &$name, target: i32, start: i32, end: i32) -> $name;
+
             /// Gets the value at `idx`, equivalent to the javascript `my_var = arr[idx]`.
             #[wasm_bindgen(method, structural, indexing_getter)]
             pub fn get_index(this: &$name, idx: u32) -> $ty;
@@ -5927,7 +6248,7 @@ macro_rules! arrays {
             /// This function returns a new typed array which is a view into
             /// wasm's memory. This view does not copy the underlying data.
             ///
-            /// # Unsafety
+            /// # Safety
             ///
             /// Views into WebAssembly memory are only valid so long as the
             /// backing buffer isn't resized in JS. Once this function is called
@@ -5956,7 +6277,7 @@ macro_rules! arrays {
             /// This function returns a new typed array which is a view into
             /// wasm's memory. This view does not copy the underlying data.
             ///
-            /// # Unsafety
+            /// # Safety
             ///
             /// Views into WebAssembly memory are only valid so long as the
             /// backing buffer isn't resized in JS. Once this function is called
@@ -5980,10 +6301,10 @@ macro_rules! arrays {
             /// Rust pointer.
             ///
             /// This function will efficiently copy the memory from a typed
-            /// array into this wasm module's own linear memory, initializing
+            /// array into this Wasm module's own linear memory, initializing
             /// the memory destination provided.
             ///
-            /// # Unsafety
+            /// # Safety
             ///
             /// This function requires `dst` to point to a buffer
             /// large enough to fit this array's contents.
@@ -5999,7 +6320,7 @@ macro_rules! arrays {
             /// Rust slice.
             ///
             /// This function will efficiently copy the memory from a typed
-            /// array into this wasm module's own linear memory, initializing
+            /// array into this Wasm module's own linear memory, initializing
             /// the memory destination provided.
             ///
             /// # Panics
@@ -6007,22 +6328,39 @@ macro_rules! arrays {
             /// This function will panic if this typed array's length is
             /// different than the length of the provided `dst` array.
             pub fn copy_to(&self, dst: &mut [$ty]) {
-                assert_eq!(self.length() as usize, dst.len());
+                core::assert_eq!(self.length() as usize, dst.len());
                 unsafe { self.raw_copy_to_ptr(dst.as_mut_ptr()); }
+            }
+
+            /// Copy the contents of this JS typed array into the destination
+            /// Rust slice.
+            ///
+            /// This function will efficiently copy the memory from a typed
+            /// array into this Wasm module's own linear memory, initializing
+            /// the memory destination provided.
+            ///
+            /// # Panics
+            ///
+            /// This function will panic if this typed array's length is
+            /// different than the length of the provided `dst` array.
+            pub fn copy_to_uninit<'dst>(&self, dst: &'dst mut [MaybeUninit<$ty>]) -> &'dst mut [$ty] {
+                core::assert_eq!(self.length() as usize, dst.len());
+                unsafe { self.raw_copy_to_ptr(dst.as_mut_ptr().cast()); }
+                unsafe { &mut *(dst as *mut [MaybeUninit<$ty>] as *mut [$ty]) }
             }
 
             /// Copy the contents of the source Rust slice into this
             /// JS typed array.
             ///
             /// This function will efficiently copy the memory from within
-            /// the wasm module's own linear memory to this typed array.
+            /// the Wasm module's own linear memory to this typed array.
             ///
             /// # Panics
             ///
             /// This function will panic if this typed array's length is
             /// different than the length of the provided `src` array.
             pub fn copy_from(&self, src: &[$ty]) {
-                assert_eq!(self.length() as usize, src.len());
+                core::assert_eq!(self.length() as usize, src.len());
                 // This is safe because the `set` function copies from its TypedArray argument
                 unsafe { self.set(&$name::view(src), 0) }
             }
