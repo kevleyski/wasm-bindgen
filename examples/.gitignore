@@ -1,4 +1,4 @@
 package-lock.json
 pkg
-dist
+#dist
 wasm-pack.log
