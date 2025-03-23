@@ -35,7 +35,7 @@ fn start() {
         .unwrap();
 
     // Draw the right eye.
-    context.move_to(95.0, 65.0);
+    context.move_to(95.0, 60.0);
     context
         .arc(90.0, 60.0, 5.0, 0.0, f64::consts::PI * 2.0)
         .unwrap();
